@@ -78,11 +78,10 @@ function generateSyncPlist(binPath: string): string {
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>${homedir()}/Library/Logs/proton-drive-sync.log</string>
-    <key>StandardErrorPath</key>
-    <string>${homedir()}/Library/Logs/proton-drive-sync.error.log</string>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
 </dict>
 </plist>
 `;
@@ -147,7 +146,7 @@ export function serviceInstallCommand(): void {
     console.log(`Created: ${PLIST_PATH}`);
     loadService(SERVICE_NAME, PLIST_PATH);
     console.log('proton-drive-sync service installed and started.');
-    console.log(`Logs: ~/Library/Logs/proton-drive-sync.log`);
+    console.log('View logs with: proton-drive-sync logs');
 }
 
 export function serviceUninstallCommand(): void {
@@ -179,24 +178,23 @@ export function serviceStopCommand(): void {
         process.exit(1);
     }
 
-    // Stop the launchd service if it exists
+    // Unload the service to stop it and prevent restart
     if (existsSync(PLIST_PATH)) {
         try {
-            execSync(`launchctl stop ${SERVICE_NAME}`, { stdio: 'ignore' });
-            console.log('Service stopped. It will restart on next boot.');
+            execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' });
         } catch {
-            // Ignore if not running
+            // Ignore if not loaded
         }
     }
 
     // Also kill any running proton-drive-sync processes
     try {
-        execSync('pkill -f "proton-drive-sync.*sync"', { stdio: 'ignore' });
+        execSync('pkill -f "proton-drive-sync.*/index.js.*sync"', { stdio: 'ignore' });
     } catch {
         // Ignore if no processes found
     }
 
-    console.log('proton-drive-sync stopped.');
+    console.log('proton-drive-sync stopped. Run `proton-drive-sync service start` to restart.');
 }
 
 export function serviceStartCommand(): void {
@@ -211,7 +209,7 @@ export function serviceStartCommand(): void {
     }
 
     try {
-        execSync(`launchctl start ${SERVICE_NAME}`, { stdio: 'ignore' });
+        execSync(`launchctl load "${PLIST_PATH}"`, { stdio: 'ignore' });
         console.log('Service started.');
     } catch {
         console.error('Failed to start service.');

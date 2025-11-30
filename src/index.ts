@@ -5,6 +5,7 @@
 import { program } from 'commander';
 import { authCommand } from './cli/auth.js';
 import { configCommand } from './cli/config.js';
+import { logsCommand } from './cli/logs.js';
 import { resetCommand } from './cli/reset.js';
 import {
     serviceInstallCommand,
@@ -37,6 +38,12 @@ program
     .option('-n, --dry-run', 'Show what would be synced without making changes')
     .option('-w, --watch', 'Keep running and watch for changes')
     .action(syncCommand);
+
+program
+    .command('logs')
+    .description('View service logs')
+    .option('-f, --follow', 'Follow logs in real-time')
+    .action(logsCommand);
 
 const serviceCommand = program
     .command('service')
