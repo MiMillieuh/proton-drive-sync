@@ -43,6 +43,7 @@ const DEBOUNCE_MS = 500;
 
 let dryRun = false;
 let daemonMode = false;
+let remoteRoot = '';
 
 // ============================================================================
 // Watchman Client
@@ -75,7 +76,7 @@ async function processChanges(): Promise<void> {
     for (const [path, change] of changes) {
         // Use the directory name as the prefix for the remote path
         const dirName = basename(change.watchRoot);
-        const fullPath = `${dirName}/${path}`;
+        const fullPath = remoteRoot ? `${remoteRoot}/${dirName}/${path}` : `${dirName}/${path}`;
 
         try {
             if (change.exists) {
@@ -389,6 +390,9 @@ export async function syncCommand(options: {
 
     // Load config
     const config = loadConfig();
+
+    // Set remote root from config
+    remoteRoot = config.remote_root;
 
     // Authenticate using stored credentials
     protonClient = await authenticateFromKeychain();

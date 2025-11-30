@@ -17,7 +17,11 @@ program
 
 program.command('config').description('Open config file in nano').action(configCommand);
 
-program.command('reset').description('Reset sync state').action(resetCommand);
+program
+    .command('reset')
+    .description('Reset sync state')
+    .option('-y, --yes', 'Skip confirmation prompt')
+    .action(resetCommand);
 
 program
     .command('sync')

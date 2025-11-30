@@ -14,6 +14,7 @@ import { xdgConfig } from 'xdg-basedir';
 
 export interface Config {
     sync_dirs: string[];
+    remote_root: string;
 }
 
 // ============================================================================
@@ -59,6 +60,11 @@ export function loadConfig(): Config {
         if (config.sync_dirs.length === 0) {
             console.error('Config "sync_dirs" array is empty');
             process.exit(1);
+        }
+
+        // Default remote_root to empty string if not set
+        if (config.remote_root === undefined) {
+            config.remote_root = '';
         }
 
         // Validate all directories exist
