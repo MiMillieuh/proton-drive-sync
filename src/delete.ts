@@ -1,30 +1,16 @@
-#!/usr/bin/env node
-
 /**
  * Proton Drive - Delete File or Directory
  *
  * Deletes a file or directory from Proton Drive.
- * - Pass a local path (e.g., my_files/foo/bar.txt) and the corresponding remote item is deleted.
+ * - Pass a path (e.g., my_files/foo/bar.txt) and the corresponding remote item is deleted.
  * - If the remote item doesn't exist, does nothing (noop).
- * - By default, moves to trash. Use --permanent to delete permanently.
+ * - By default, moves to trash. Use permanent=true to delete permanently.
  *
  * Path handling:
  * - If the path starts with my_files/, that prefix is stripped.
  */
 
 import { basename, dirname } from 'path';
-import { input, password, confirm } from '@inquirer/prompts';
-// @ts-expect-error - keychain doesn't have type definitions
-import keychain from 'keychain';
-import { promisify } from 'util';
-import {
-    ProtonAuth,
-    createProtonHttpClient,
-    createProtonAccount,
-    createSrpModule,
-    createOpenPGPCrypto,
-    initCrypto,
-} from './auth.js';
 
 // ============================================================================
 // Types
@@ -53,80 +39,11 @@ interface DeleteResult {
     error?: unknown;
 }
 
-interface ProtonDriveClientType {
+export interface ProtonDriveClient {
     iterateFolderChildren(folderUid: string): AsyncIterable<NodeResult>;
     getMyFilesRootFolder(): Promise<RootFolderResult>;
     trashNodes(nodeUids: string[]): AsyncIterable<DeleteResult>;
     deleteNodes(nodeUids: string[]): AsyncIterable<DeleteResult>;
-}
-
-interface StoredCredentials {
-    username: string;
-    password: string;
-}
-
-interface ApiError extends Error {
-    requires2FA?: boolean;
-    code?: number;
-}
-
-// ============================================================================
-// Keychain Helpers
-// ============================================================================
-
-const KEYCHAIN_SERVICE = 'proton-drive-sync';
-const KEYCHAIN_ACCOUNT_PREFIX = 'proton-drive-sync:';
-
-const keychainGetPassword = promisify(keychain.getPassword).bind(keychain);
-const keychainSetPassword = promisify(keychain.setPassword).bind(keychain);
-const keychainDeletePassword = promisify(keychain.deletePassword).bind(keychain);
-
-async function getStoredCredentials(): Promise<StoredCredentials | null> {
-    try {
-        const username = await keychainGetPassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-            service: KEYCHAIN_SERVICE,
-        });
-        const pwd = await keychainGetPassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-            service: KEYCHAIN_SERVICE,
-        });
-        return { username, password: pwd };
-    } catch {
-        return null;
-    }
-}
-
-async function storeCredentials(username: string, pwd: string): Promise<void> {
-    await keychainSetPassword({
-        account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-        service: KEYCHAIN_SERVICE,
-        password: username,
-    });
-    await keychainSetPassword({
-        account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-        service: KEYCHAIN_SERVICE,
-        password: pwd,
-    });
-}
-
-async function deleteStoredCredentials(): Promise<void> {
-    try {
-        await keychainDeletePassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-            service: KEYCHAIN_SERVICE,
-        });
-    } catch {
-        // Ignore
-    }
-    try {
-        await keychainDeletePassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-            service: KEYCHAIN_SERVICE,
-        });
-    } catch {
-        // Ignore
-    }
 }
 
 // ============================================================================
@@ -143,7 +60,7 @@ async function deleteStoredCredentials(): Promise<void> {
  * cache flag isn't set, and subsequent calls would hit the API again.
  */
 async function findNodeByName(
-    client: ProtonDriveClientType,
+    client: ProtonDriveClient,
     parentFolderUid: string,
     name: string
 ): Promise<{ uid: string; type: string } | null> {
@@ -194,7 +111,7 @@ function parsePath(localPath: string): { parentParts: string[]; name: string } {
  * Returns null if any part of the path doesn't exist.
  */
 async function traverseRemotePath(
-    client: ProtonDriveClientType,
+    client: ProtonDriveClient,
     rootFolderUid: string,
     pathParts: string[]
 ): Promise<string | null> {
@@ -221,168 +138,76 @@ async function traverseRemotePath(
 }
 
 // ============================================================================
-// Main
+// Public API
 // ============================================================================
 
-async function main(): Promise<void> {
-    const args = process.argv.slice(2);
-    const permanent = args.includes('--permanent');
-    const localPath = args.find((arg) => !arg.startsWith('--'));
+export interface DeleteOperationResult {
+    success: boolean;
+    existed: boolean;
+    nodeUid?: string;
+    nodeType?: string;
+    error?: string;
+}
 
-    if (!localPath) {
-        console.error('Usage: npx ts-node src/delete.ts <path> [--permanent]');
-        console.error('');
-        console.error('Examples:');
-        console.error('  npx ts-node src/delete.ts my_files/document.txt       # Move to trash');
-        console.error(
-            '  npx ts-node src/delete.ts my_files/photos/            # Move folder to trash'
-        );
-        console.error(
-            '  npx ts-node src/delete.ts my_files/old.txt --permanent # Delete permanently'
-        );
-        process.exit(1);
-    }
+/**
+ * Delete a file or directory from Proton Drive.
+ *
+ * @param client - The Proton Drive client
+ * @param remotePath - The remote path (e.g., "my_files/foo/bar.txt")
+ * @param permanent - If true, permanently delete; if false, move to trash (default)
+ * @returns DeleteOperationResult with success status
+ */
+export async function deleteNode(
+    client: ProtonDriveClient,
+    remotePath: string,
+    permanent: boolean = false
+): Promise<DeleteOperationResult> {
+    const { parentParts, name } = parsePath(remotePath);
 
-    const { parentParts, name } = parsePath(localPath);
-
-    console.log(`Deleting from remote: ${localPath}`);
-    console.log(`  Name: ${name}`);
-    if (parentParts.length > 0) {
-        console.log(`  Parent path: ${parentParts.join('/')}`);
-    }
+    console.log(`Deleting from remote: ${remotePath}`);
     console.log(`  Mode: ${permanent ? 'permanent delete' : 'move to trash'}`);
-    console.log();
 
+    // Get root folder
+    const rootFolder = await client.getMyFilesRootFolder();
+
+    if (!rootFolder.ok) {
+        return {
+            success: false,
+            existed: false,
+            error: `Failed to get root folder: ${rootFolder.error}`,
+        };
+    }
+
+    const rootFolderUid = rootFolder.value!.uid;
+
+    // Traverse to parent folder
+    let targetFolderUid = rootFolderUid;
+
+    if (parentParts.length > 0) {
+        console.log(`Traversing path: ${parentParts.join('/')}`);
+        const traverseResult = await traverseRemotePath(client, rootFolderUid, parentParts);
+
+        if (!traverseResult) {
+            console.log('Path does not exist on remote. Nothing to delete.');
+            return { success: true, existed: false };
+        }
+
+        targetFolderUid = traverseResult;
+    }
+
+    // Find the target node
+    console.log(`Looking for "${name}"...`);
+    const targetNode = await findNodeByName(client, targetFolderUid, name);
+
+    if (!targetNode) {
+        console.log(`"${name}" does not exist on remote. Nothing to delete.`);
+        return { success: true, existed: false };
+    }
+
+    console.log(`Found ${targetNode.type}: ${name} (${targetNode.uid})`);
+
+    // Delete or trash the node
     try {
-        await initCrypto();
-
-        let username: string;
-        let pwd: string;
-
-        const storedCreds = await getStoredCredentials();
-
-        if (storedCreds) {
-            console.log(`Found stored credentials for: ${storedCreds.username}`);
-            const useStored = await confirm({
-                message: 'Use stored credentials?',
-                default: true,
-            });
-
-            if (useStored) {
-                username = storedCreds.username;
-                pwd = storedCreds.password;
-            } else {
-                username = await input({ message: 'Proton username:' });
-                pwd = await password({ message: 'Password:' });
-            }
-        } else {
-            username = await input({ message: 'Proton username:' });
-            pwd = await password({ message: 'Password:' });
-        }
-
-        if (!username || !pwd) {
-            console.error('Username and password are required.');
-            process.exit(1);
-        }
-
-        if (!storedCreds || storedCreds.username !== username || storedCreds.password !== pwd) {
-            const saveToKeychain = await confirm({
-                message: 'Save credentials to Keychain?',
-                default: true,
-            });
-
-            if (saveToKeychain) {
-                await deleteStoredCredentials();
-                await storeCredentials(username, pwd);
-                console.log('Credentials saved to Keychain.');
-            }
-        }
-
-        console.log('\nAuthenticating with Proton...');
-        const auth = new ProtonAuth();
-
-        let session;
-        try {
-            session = await auth.login(username, pwd);
-        } catch (error) {
-            if ((error as ApiError).requires2FA) {
-                const code = await input({ message: 'Enter 2FA code:' });
-                await auth.submit2FA(code);
-                session = auth.getSession();
-            } else {
-                throw error;
-            }
-        }
-
-        console.log(`Logged in as: ${session?.user?.Name || username}\n`);
-
-        // Load the SDK
-        type SDKModule = typeof import('@protontech/drive-sdk');
-        let sdk: SDKModule;
-        try {
-            sdk = await import('@protontech/drive-sdk');
-        } catch {
-            console.error('Error: Could not load @protontech/drive-sdk');
-            console.error('Make sure the SDK is built: cd ../sdk/js/sdk && pnpm build');
-            process.exit(1);
-        }
-
-        const httpClient = createProtonHttpClient(session!);
-        const openPGPCryptoModule = createOpenPGPCrypto();
-        const account = createProtonAccount(session!, openPGPCryptoModule);
-        const srpModuleInstance = createSrpModule();
-
-        const client: ProtonDriveClientType = new sdk.ProtonDriveClient({
-            httpClient,
-            entitiesCache: new sdk.MemoryCache(),
-            cryptoCache: new sdk.MemoryCache(),
-            // @ts-expect-error - PrivateKey types differ between openpgp imports
-            account,
-            // @ts-expect-error - PrivateKey types differ between openpgp imports
-            openPGPCryptoModule,
-            srpModule: srpModuleInstance,
-        });
-
-        // Get root folder
-        console.log('Getting root folder...');
-        const rootFolder = await client.getMyFilesRootFolder();
-
-        if (!rootFolder.ok) {
-            console.error('Failed to get root folder:', rootFolder.error);
-            process.exit(1);
-        }
-
-        const rootFolderUid = rootFolder.value!.uid;
-
-        // Traverse to parent folder
-        let targetFolderUid = rootFolderUid;
-
-        if (parentParts.length > 0) {
-            console.log(`Traversing path: ${parentParts.join('/')}`);
-            const traverseResult = await traverseRemotePath(client, rootFolderUid, parentParts);
-
-            if (!traverseResult) {
-                console.log('\nPath does not exist on remote. Nothing to delete.');
-                await auth.logout();
-                return;
-            }
-
-            targetFolderUid = traverseResult;
-        }
-
-        // Find the target node
-        console.log(`Looking for "${name}"...`);
-        const targetNode = await findNodeByName(client, targetFolderUid, name);
-
-        if (!targetNode) {
-            console.log(`\n"${name}" does not exist on remote. Nothing to delete.`);
-            await auth.logout();
-            return;
-        }
-
-        console.log(`Found ${targetNode.type}: ${name} (${targetNode.uid})`);
-
-        // Delete or trash the node
         if (permanent) {
             console.log(`Permanently deleting...`);
             for await (const result of client.deleteNodes([targetNode.uid])) {
@@ -401,14 +226,19 @@ async function main(): Promise<void> {
             console.log(`Moved to trash!`);
         }
 
-        await auth.logout();
+        return {
+            success: true,
+            existed: true,
+            nodeUid: targetNode.uid,
+            nodeType: targetNode.type,
+        };
     } catch (error) {
-        console.error('\nError:', (error as Error).message);
-        if ((error as ApiError).code) {
-            console.error('Error code:', (error as ApiError).code);
-        }
-        process.exit(1);
+        return {
+            success: false,
+            existed: true,
+            nodeUid: targetNode.uid,
+            nodeType: targetNode.type,
+            error: (error as Error).message,
+        };
     }
 }
-
-main();

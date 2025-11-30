@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Proton Drive - Create File or Directory
  *
@@ -15,18 +13,6 @@
 import { createReadStream, statSync, Stats } from 'fs';
 import { Readable } from 'stream';
 import { basename, dirname } from 'path';
-import { input, password, confirm } from '@inquirer/prompts';
-// @ts-expect-error - keychain doesn't have type definitions
-import keychain from 'keychain';
-import { promisify } from 'util';
-import {
-    ProtonAuth,
-    createProtonHttpClient,
-    createProtonAccount,
-    createSrpModule,
-    createOpenPGPCrypto,
-    initCrypto,
-} from './auth.js';
 
 // ============================================================================
 // Types
@@ -85,7 +71,7 @@ interface CreateFolderResult {
     error?: unknown;
 }
 
-interface ProtonDriveClientType {
+export interface ProtonDriveClient {
     iterateFolderChildren(folderUid: string): AsyncIterable<NodeResult>;
     getMyFilesRootFolder(): Promise<RootFolderResult>;
     createFolder(
@@ -104,75 +90,6 @@ interface ProtonDriveClientType {
         metadata: UploadMetadata,
         signal?: AbortSignal
     ): Promise<FileRevisionUploader>;
-}
-
-interface StoredCredentials {
-    username: string;
-    password: string;
-}
-
-interface ApiError extends Error {
-    requires2FA?: boolean;
-    code?: number;
-}
-
-// ============================================================================
-// Keychain Helpers
-// ============================================================================
-
-const KEYCHAIN_SERVICE = 'proton-drive-sync';
-const KEYCHAIN_ACCOUNT_PREFIX = 'proton-drive-sync:';
-
-const keychainGetPassword = promisify(keychain.getPassword).bind(keychain);
-const keychainSetPassword = promisify(keychain.setPassword).bind(keychain);
-const keychainDeletePassword = promisify(keychain.deletePassword).bind(keychain);
-
-async function getStoredCredentials(): Promise<StoredCredentials | null> {
-    try {
-        const username = await keychainGetPassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-            service: KEYCHAIN_SERVICE,
-        });
-        const pwd = await keychainGetPassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-            service: KEYCHAIN_SERVICE,
-        });
-        return { username, password: pwd };
-    } catch {
-        return null;
-    }
-}
-
-async function storeCredentials(username: string, pwd: string): Promise<void> {
-    await keychainSetPassword({
-        account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-        service: KEYCHAIN_SERVICE,
-        password: username,
-    });
-    await keychainSetPassword({
-        account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-        service: KEYCHAIN_SERVICE,
-        password: pwd,
-    });
-}
-
-async function deleteStoredCredentials(): Promise<void> {
-    try {
-        await keychainDeletePassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-            service: KEYCHAIN_SERVICE,
-        });
-    } catch {
-        // Ignore
-    }
-    try {
-        await keychainDeletePassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-            service: KEYCHAIN_SERVICE,
-        });
-    } catch {
-        // Ignore
-    }
 }
 
 // ============================================================================
@@ -208,7 +125,7 @@ function nodeStreamToWebStream(nodeStream: Readable): ReadableStream<Uint8Array>
  * the SDK's cache is marked as "children complete". See findFolderByName for details.
  */
 async function findFileByName(
-    client: ProtonDriveClientType,
+    client: ProtonDriveClient,
     folderUid: string,
     fileName: string
 ): Promise<string | null> {
@@ -231,7 +148,7 @@ async function findFileByName(
  * cache flag isn't set, and subsequent calls would hit the API again.
  */
 async function findFolderByName(
-    client: ProtonDriveClientType,
+    client: ProtonDriveClient,
     parentFolderUid: string,
     folderName: string
 ): Promise<string | null> {
@@ -290,7 +207,7 @@ function parsePath(localPath: string): { parentParts: string[]; name: string } {
  * Once we need to create a folder, all subsequent folders must be created (no more searching).
  */
 async function ensureRemotePath(
-    client: ProtonDriveClientType,
+    client: ProtonDriveClient,
     rootFolderUid: string,
     pathParts: string[]
 ): Promise<string> {
@@ -345,12 +262,12 @@ function formatSize(bytes: number): string {
 // ============================================================================
 
 async function uploadFile(
-    client: ProtonDriveClientType,
+    client: ProtonDriveClient,
     targetFolderUid: string,
     localFilePath: string,
     fileName: string,
     fileStat: Stats
-): Promise<void> {
+): Promise<string> {
     const fileSize = Number(fileStat.size);
 
     // Check if file already exists in the target folder
@@ -400,6 +317,7 @@ async function uploadFile(
     console.log('\n');
     console.log(`Upload complete!`);
     console.log(`Node UID: ${nodeUid}`);
+    return nodeUid;
 }
 
 // ============================================================================
@@ -407,10 +325,10 @@ async function uploadFile(
 // ============================================================================
 
 async function createDirectory(
-    client: ProtonDriveClientType,
+    client: ProtonDriveClient,
     targetFolderUid: string,
     dirName: string
-): Promise<void> {
+): Promise<string> {
     // Check if directory already exists
     console.log(`Checking if "${dirName}" already exists...`);
     const existingFolderUid = await findFolderByName(client, targetFolderUid, dirName);
@@ -418,6 +336,7 @@ async function createDirectory(
     if (existingFolderUid) {
         console.log(`Directory already exists.`);
         console.log(`Node UID: ${existingFolderUid}`);
+        return existingFolderUid;
     } else {
         console.log(`Creating directory: ${dirName}`);
         const result = await client.createFolder(targetFolderUid, dirName);
@@ -426,28 +345,29 @@ async function createDirectory(
         }
         console.log(`Directory created!`);
         console.log(`Node UID: ${result.value!.uid}`);
+        return result.value!.uid;
     }
 }
 
 // ============================================================================
-// Main
+// Public API
 // ============================================================================
 
-async function main(): Promise<void> {
-    const localPath = process.argv[2];
+export interface CreateResult {
+    success: boolean;
+    nodeUid?: string;
+    error?: string;
+    isDirectory: boolean;
+}
 
-    if (!localPath) {
-        console.error('Usage: npx ts-node src/create.ts <path>');
-        console.error('');
-        console.error('Examples:');
-        console.error('  npx ts-node src/create.ts my_files/document.txt     # Upload a file');
-        console.error('  npx ts-node src/create.ts my_files/photos/          # Create a directory');
-        console.error(
-            '  npx ts-node src/create.ts my_files/a/b/c/file.txt   # Upload with nested dirs'
-        );
-        process.exit(1);
-    }
-
+/**
+ * Create a file or directory on Proton Drive.
+ *
+ * @param client - The Proton Drive client
+ * @param localPath - The local path (e.g., "my_files/foo/bar.txt")
+ * @returns CreateResult with success status and node UID
+ */
+export async function create(client: ProtonDriveClient, localPath: string): Promise<CreateResult> {
     // Check if path exists locally
     let pathStat: Stats | null = null;
     let isDirectory = false;
@@ -460,9 +380,11 @@ async function main(): Promise<void> {
         if (localPath.endsWith('/')) {
             isDirectory = true;
         } else {
-            console.error(`Error: Path not found: ${localPath}`);
-            console.error('For creating a new directory, add a trailing slash: my_files/newdir/');
-            process.exit(1);
+            return {
+                success: false,
+                error: `Path not found: ${localPath}. For creating a new directory, add a trailing slash.`,
+                isDirectory: false,
+            };
         }
     }
 
@@ -470,144 +392,45 @@ async function main(): Promise<void> {
 
     if (isDirectory) {
         console.log(`Creating directory: ${localPath}`);
-        console.log(`  Name: ${name}`);
-        if (parentParts.length > 0) {
-            console.log(`  Parent path: ${parentParts.join('/')}`);
-        }
     } else {
-        console.log(`Uploading file: ${localPath}`);
-        console.log(`  Name: ${name}`);
-        console.log(`  Size: ${formatSize(pathStat!.size)}`);
-        if (parentParts.length > 0) {
-            console.log(`  Parent path: ${parentParts.join('/')}`);
-        }
+        console.log(`Uploading file: ${localPath} (${formatSize(pathStat!.size)})`);
     }
-    console.log();
 
+    // Get root folder
+    const rootFolder = await client.getMyFilesRootFolder();
+
+    if (!rootFolder.ok) {
+        return {
+            success: false,
+            error: `Failed to get root folder: ${rootFolder.error}`,
+            isDirectory,
+        };
+    }
+
+    const rootFolderUid = rootFolder.value!.uid;
+
+    // Ensure parent directories exist
+    let targetFolderUid = rootFolderUid;
+
+    if (parentParts.length > 0) {
+        console.log(`Ensuring parent path exists: ${parentParts.join('/')}`);
+        targetFolderUid = await ensureRemotePath(client, rootFolderUid, parentParts);
+    }
+
+    // Create file or directory
     try {
-        await initCrypto();
-
-        let username: string;
-        let pwd: string;
-
-        const storedCreds = await getStoredCredentials();
-
-        if (storedCreds) {
-            console.log(`Found stored credentials for: ${storedCreds.username}`);
-            const useStored = await confirm({
-                message: 'Use stored credentials?',
-                default: true,
-            });
-
-            if (useStored) {
-                username = storedCreds.username;
-                pwd = storedCreds.password;
-            } else {
-                username = await input({ message: 'Proton username:' });
-                pwd = await password({ message: 'Password:' });
-            }
-        } else {
-            username = await input({ message: 'Proton username:' });
-            pwd = await password({ message: 'Password:' });
-        }
-
-        if (!username || !pwd) {
-            console.error('Username and password are required.');
-            process.exit(1);
-        }
-
-        if (!storedCreds || storedCreds.username !== username || storedCreds.password !== pwd) {
-            const saveToKeychain = await confirm({
-                message: 'Save credentials to Keychain?',
-                default: true,
-            });
-
-            if (saveToKeychain) {
-                await deleteStoredCredentials();
-                await storeCredentials(username, pwd);
-                console.log('Credentials saved to Keychain.');
-            }
-        }
-
-        console.log('\nAuthenticating with Proton...');
-        const auth = new ProtonAuth();
-
-        let session;
-        try {
-            session = await auth.login(username, pwd);
-        } catch (error) {
-            if ((error as ApiError).requires2FA) {
-                const code = await input({ message: 'Enter 2FA code:' });
-                await auth.submit2FA(code);
-                session = auth.getSession();
-            } else {
-                throw error;
-            }
-        }
-
-        console.log(`Logged in as: ${session?.user?.Name || username}\n`);
-
-        // Load the SDK
-        type SDKModule = typeof import('@protontech/drive-sdk');
-        let sdk: SDKModule;
-        try {
-            sdk = await import('@protontech/drive-sdk');
-        } catch {
-            console.error('Error: Could not load @protontech/drive-sdk');
-            console.error('Make sure the SDK is built: cd ../sdk/js/sdk && pnpm build');
-            process.exit(1);
-        }
-
-        const httpClient = createProtonHttpClient(session!);
-        const openPGPCryptoModule = createOpenPGPCrypto();
-        const account = createProtonAccount(session!, openPGPCryptoModule);
-        const srpModuleInstance = createSrpModule();
-
-        const client: ProtonDriveClientType = new sdk.ProtonDriveClient({
-            httpClient,
-            entitiesCache: new sdk.MemoryCache(),
-            cryptoCache: new sdk.MemoryCache(),
-            // @ts-expect-error - PrivateKey types differ between openpgp imports
-            account,
-            // @ts-expect-error - PrivateKey types differ between openpgp imports
-            openPGPCryptoModule,
-            srpModule: srpModuleInstance,
-        });
-
-        // Get root folder
-        console.log('Getting root folder...');
-        const rootFolder = await client.getMyFilesRootFolder();
-
-        if (!rootFolder.ok) {
-            console.error('Failed to get root folder:', rootFolder.error);
-            process.exit(1);
-        }
-
-        const rootFolderUid = rootFolder.value!.uid;
-
-        // Ensure parent directories exist
-        let targetFolderUid = rootFolderUid;
-
-        if (parentParts.length > 0) {
-            console.log(`Ensuring parent path exists: ${parentParts.join('/')}`);
-            targetFolderUid = await ensureRemotePath(client, rootFolderUid, parentParts);
-        }
-
-        // Create file or directory
         if (isDirectory) {
-            await createDirectory(client, targetFolderUid, name);
+            const nodeUid = await createDirectory(client, targetFolderUid, name);
+            return { success: true, nodeUid, isDirectory: true };
         } else {
-            await uploadFile(client, targetFolderUid, localPath, name, pathStat!);
+            const nodeUid = await uploadFile(client, targetFolderUid, localPath, name, pathStat!);
+            return { success: true, nodeUid, isDirectory: false };
         }
-
-        await auth.logout();
     } catch (error) {
-        console.error('\nError:', (error as Error).message);
-        if ((error as ApiError).code) {
-            console.error('Error code:', (error as ApiError).code);
-        }
-        process.exit(1);
+        return {
+            success: false,
+            error: (error as Error).message,
+            isDirectory,
+        };
     }
 }
-
-main();
