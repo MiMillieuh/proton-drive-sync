@@ -25,7 +25,7 @@ if (!xdgState) {
     process.exit(1);
 }
 
-const STATE_DIR = join(xdgState, 'proton-drive-sync');
+export const STATE_DIR = join(xdgState, 'proton-drive-sync');
 const STATE_FILE = join(STATE_DIR, 'state.json');
 
 // ============================================================================

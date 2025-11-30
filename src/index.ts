@@ -18,6 +18,7 @@ import {
 } from './auth.js';
 import { getStoredCredentials, storeCredentials, deleteStoredCredentials } from './keychain.js';
 import { appState, saveState } from './state.js';
+import { logger, enableVerbose } from './logger.js';
 import type { ProtonDriveClient, ApiError } from './types.js';
 import { createNode } from './create.js';
 import { deleteNode } from './delete.js';
@@ -75,31 +76,31 @@ async function processChanges(): Promise<void> {
             if (change.exists) {
                 // File or directory was created/modified
                 const typeLabel = change.type === 'd' ? 'directory' : 'file';
-                console.log(`\n[SYNC] Creating/updating ${typeLabel}: ${path}`);
+                logger.info(`Creating/updating ${typeLabel}: ${path}`);
 
                 const result = await createNode(protonClient, fullPath);
                 if (result.success) {
-                    console.log(`[SYNC] Success: ${path} -> ${result.nodeUid}`);
+                    logger.info(`Success: ${path} -> ${result.nodeUid}`);
                 } else {
-                    console.error(`[SYNC] Failed: ${path} - ${result.error}`);
+                    logger.error(`Failed: ${path} - ${result.error}`);
                 }
             } else {
                 // File or directory was deleted
-                console.log(`\n[SYNC] Deleting: ${path}`);
+                logger.info(`Deleting: ${path}`);
 
                 const result = await deleteNode(protonClient, fullPath, false);
                 if (result.success) {
                     if (result.existed) {
-                        console.log(`[SYNC] Deleted: ${path}`);
+                        logger.info(`Deleted: ${path}`);
                     } else {
-                        console.log(`[SYNC] Already gone: ${path}`);
+                        logger.info(`Already gone: ${path}`);
                     }
                 } else {
-                    console.error(`[SYNC] Failed to delete: ${path} - ${result.error}`);
+                    logger.error(`Failed to delete: ${path} - ${result.error}`);
                 }
             }
         } catch (error) {
-            console.error(`[SYNC] Error processing ${path}:`, (error as Error).message);
+            logger.error(`Error processing ${path}: ${(error as Error).message}`);
         }
     }
 
@@ -124,7 +125,7 @@ function scheduleProcessing(): void {
 function queueChange(file: FileChange): void {
     const status = file.exists ? (file.type === 'd' ? 'dir changed' : 'changed') : 'deleted';
     const typeLabel = file.type === 'd' ? 'dir' : 'file';
-    console.log(`[${status}] ${file.name} (size: ${file.size ?? 0}, type: ${typeLabel})`);
+    logger.debug(`[${status}] ${file.name} (size: ${file.size ?? 0}, type: ${typeLabel})`);
 
     pendingChanges.set(file.name, file);
     scheduleProcessing();
@@ -196,13 +197,13 @@ async function authenticateFromKeychain(): Promise<ProtonDriveClient> {
     const storedCreds = await getStoredCredentials();
 
     if (!storedCreds) {
-        console.error('No credentials found. Run `proton-drive-sync auth` first.');
+        logger.error('No credentials found. Run `proton-drive-sync auth` first.');
         process.exit(1);
     }
 
-    console.log(`Authenticating as ${storedCreds.username}...`);
+    logger.info(`Authenticating as ${storedCreds.username}...`);
     const client = await createClient(storedCreds.username, storedCreds.password);
-    console.log('Authenticated.\n');
+    logger.info('Authenticated.');
 
     return client;
 }
@@ -215,7 +216,7 @@ function setupWatchman(): void {
     // Step 1: Find root (watch-project)
     watchmanClient.command(['watch-project', WATCH_DIR], (err, resp) => {
         if (err) {
-            console.error('Watchman error:', err);
+            logger.error(`Watchman error: ${err}`);
             process.exit(1);
         }
 
@@ -227,9 +228,9 @@ function setupWatchman(): void {
         const savedClock = appState.clock;
 
         if (savedClock) {
-            console.log('Resuming from last sync state...');
+            logger.info('Resuming from last sync state...');
         } else {
-            console.log('First run - syncing all existing files...');
+            logger.info('First run - syncing all existing files...');
         }
 
         // Step 3: Build a subscription query
@@ -251,10 +252,10 @@ function setupWatchman(): void {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (watchmanClient as any).command(['subscribe', root, SUB_NAME, sub], (err: Error | null) => {
             if (err) {
-                console.error('Subscribe error:', err);
+                logger.error(`Subscribe error: ${err}`);
                 process.exit(1);
             }
-            console.log('Watching for file changes... (press Ctrl+C to exit)\n');
+            logger.info('Watching for file changes... (press Ctrl+C to exit)');
         });
     });
 
@@ -275,7 +276,7 @@ function setupWatchman(): void {
     });
 
     // Step 6: Handle errors & shutdown
-    watchmanClient.on('error', (e: Error) => console.error('Watchman error:', e));
+    watchmanClient.on('error', (e: Error) => logger.error(`Watchman error: ${e}`));
     watchmanClient.on('end', () => {});
 }
 
@@ -310,7 +311,11 @@ async function authCommand(): Promise<void> {
     console.log('Credentials saved to Keychain.');
 }
 
-async function syncCommand(): Promise<void> {
+async function syncCommand(options: { verbose: boolean }): Promise<void> {
+    if (options.verbose) {
+        enableVerbose();
+    }
+
     // Authenticate using stored credentials
     protonClient = await authenticateFromKeychain();
 
@@ -319,7 +324,7 @@ async function syncCommand(): Promise<void> {
 
     // Handle graceful shutdown
     process.on('SIGINT', () => {
-        console.log('\nShutting down...');
+        logger.info('Shutting down...');
         watchmanClient.end();
         process.exit(0);
     });
@@ -336,6 +341,10 @@ program
     .description('Authenticate and save credentials to Keychain')
     .action(authCommand);
 
-program.command('sync').description('Watch and sync files to Proton Drive').action(syncCommand);
+program
+    .command('sync')
+    .description('Watch and sync files to Proton Drive')
+    .option('-v, --verbose', 'Enable verbose output to console')
+    .action(syncCommand);
 
 program.parse();
