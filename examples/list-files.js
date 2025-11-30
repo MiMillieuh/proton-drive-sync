@@ -6,7 +6,7 @@
  * Lists all files in your Proton Drive.
  */
 
-import * as readline from 'readline';
+import { input, password } from '@inquirer/prompts';
 import {
     ProtonAuth,
     createProtonHttpClient,
@@ -15,81 +15,6 @@ import {
     createOpenPGPCrypto,
     initCrypto,
 } from './auth.js';
-
-// ============================================================================
-// Interactive Prompt
-// ============================================================================
-
-async function prompt(question, hidden = false) {
-    if (!hidden) {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-
-        return new Promise((resolve) => {
-            rl.question(question, (answer) => {
-                rl.close();
-                resolve(answer);
-            });
-        });
-    }
-
-    return new Promise((resolve) => {
-        process.stdout.write(question);
-        let password = '';
-
-        if (!process.stdin.isTTY) {
-            const rl = readline.createInterface({
-                input: process.stdin,
-                output: process.stdout,
-            });
-            rl.question('', (answer) => {
-                rl.close();
-                resolve(answer);
-            });
-            return;
-        }
-
-        process.stdin.setRawMode(true);
-        process.stdin.resume();
-        process.stdin.setEncoding('utf8');
-
-        const onData = (char) => {
-            char = char.toString();
-
-            switch (char) {
-                case '\n':
-                case '\r':
-                case '\u0004':
-                    process.stdin.setRawMode(false);
-                    process.stdin.pause();
-                    process.stdin.removeListener('data', onData);
-                    process.stdout.write('\n');
-                    resolve(password);
-                    break;
-                case '\u0003':
-                    process.stdin.setRawMode(false);
-                    process.stdout.write('\n');
-                    process.exit(0);
-                    break;
-                case '\u007F':
-                case '\b':
-                    if (password.length > 0) {
-                        password = password.slice(0, -1);
-                    }
-                    break;
-                default:
-                    if (char.charCodeAt(0) >= 32) {
-                        password += char;
-                    }
-                    break;
-            }
-        };
-
-        process.stdin.on('data', onData);
-    });
-}
 
 // ============================================================================
 // File Listing
@@ -146,10 +71,10 @@ async function main() {
     try {
         await initCrypto();
 
-        const username = await prompt('Proton username: ');
-        const password = await prompt('Password: ', true);
+        const username = await input({ message: 'Proton username:' });
+        const pwd = await password({ message: 'Password:' });
 
-        if (!username || !password) {
+        if (!username || !pwd) {
             console.error('Username and password are required.');
             process.exit(1);
         }
@@ -159,10 +84,10 @@ async function main() {
 
         let session;
         try {
-            session = await auth.login(username, password);
+            session = await auth.login(username, pwd);
         } catch (error) {
             if (error.requires2FA) {
-                const code = await prompt('Enter 2FA code: ');
+                const code = await input({ message: 'Enter 2FA code:' });
                 await auth.submit2FA(code);
                 session = auth.getSession();
             } else {
