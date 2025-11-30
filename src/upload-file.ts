@@ -3,13 +3,15 @@
 /**
  * Proton Drive - Upload File
  *
- * Uploads a local file to Proton Drive root folder.
+ * Uploads a local file to Proton Drive.
+ * If the file path contains directories (e.g., my_files/lol/lol2.txt),
+ * those directories will be created on the remote if they don't exist.
  * If a file with the same name exists, it will be overwritten with a new revision.
  */
 
 import { createReadStream, statSync } from 'fs';
 import { Readable } from 'stream';
-import { basename } from 'path';
+import { basename, dirname } from 'path';
 import { input, password, confirm } from '@inquirer/prompts';
 // @ts-expect-error - keychain doesn't have type definitions
 import keychain from 'keychain';
@@ -74,9 +76,20 @@ interface UploadMetadata {
     modificationTime?: Date;
 }
 
+interface CreateFolderResult {
+    ok: boolean;
+    value?: { uid: string };
+    error?: unknown;
+}
+
 interface ProtonDriveClientType {
     iterateFolderChildren(folderUid: string): AsyncIterable<NodeResult>;
     getMyFilesRootFolder(): Promise<RootFolderResult>;
+    createFolder(
+        parentNodeUid: string,
+        name: string,
+        modificationTime?: Date
+    ): Promise<CreateFolderResult>;
     getFileUploader(
         parentFolderUid: string,
         name: string,
@@ -199,6 +212,83 @@ async function findFileByName(
         }
     }
     return null;
+}
+
+/**
+ * Find an existing folder by name in a parent folder
+ */
+async function findFolderByName(
+    client: ProtonDriveClientType,
+    parentFolderUid: string,
+    folderName: string
+): Promise<string | null> {
+    for await (const node of client.iterateFolderChildren(parentFolderUid)) {
+        if (node.ok && node.value?.name === folderName && node.value.type === 'folder') {
+            return node.value.uid;
+        }
+    }
+    return null;
+}
+
+/**
+ * Get the remote path from a local file path.
+ * If the path starts with my_files/, strip that prefix.
+ * Returns the directory path (without the filename).
+ */
+function getRemoteDirPath(localFilePath: string): string[] {
+    let relativePath = localFilePath;
+
+    // Strip my_files/ prefix if present
+    if (relativePath.startsWith('my_files/')) {
+        relativePath = relativePath.slice('my_files/'.length);
+    } else if (relativePath.startsWith('./my_files/')) {
+        relativePath = relativePath.slice('./my_files/'.length);
+    }
+
+    // Get the directory part (without the filename)
+    const dirPath = dirname(relativePath);
+
+    // If there's no directory (file is at root), return empty array
+    if (dirPath === '.' || dirPath === '') {
+        return [];
+    }
+
+    // Split by / to get folder components
+    return dirPath.split('/').filter((part) => part.length > 0);
+}
+
+/**
+ * Ensure all directories in the path exist, creating them if necessary.
+ * Returns the UID of the final (deepest) folder.
+ */
+async function ensureRemotePath(
+    client: ProtonDriveClientType,
+    rootFolderUid: string,
+    pathParts: string[]
+): Promise<string> {
+    let currentFolderUid = rootFolderUid;
+
+    for (const folderName of pathParts) {
+        // Check if folder already exists
+        const existingFolderUid = await findFolderByName(client, currentFolderUid, folderName);
+
+        if (existingFolderUid) {
+            console.log(`  Found existing folder: ${folderName}`);
+            currentFolderUid = existingFolderUid;
+        } else {
+            // Create the folder
+            console.log(`  Creating folder: ${folderName}`);
+            const result = await client.createFolder(currentFolderUid, folderName);
+
+            if (!result.ok) {
+                throw new Error(`Failed to create folder "${folderName}": ${result.error}`);
+            }
+
+            currentFolderUid = result.value!.uid;
+        }
+    }
+
+    return currentFolderUid;
 }
 
 function formatSize(bytes: number): string {
@@ -337,9 +427,18 @@ async function main(): Promise<void> {
 
         const rootFolderUid = rootFolder.value!.uid;
 
-        // Check if file already exists
+        // Parse the remote directory path and ensure it exists
+        const remoteDirParts = getRemoteDirPath(localFilePath);
+        let targetFolderUid = rootFolderUid;
+
+        if (remoteDirParts.length > 0) {
+            console.log(`Ensuring remote path exists: ${remoteDirParts.join('/')}`);
+            targetFolderUid = await ensureRemotePath(client, rootFolderUid, remoteDirParts);
+        }
+
+        // Check if file already exists in the target folder
         console.log(`Checking if "${fileName}" already exists...`);
-        const existingFileUid = await findFileByName(client, rootFolderUid, fileName);
+        const existingFileUid = await findFileByName(client, targetFolderUid, fileName);
 
         const metadata: UploadMetadata = {
             mediaType: 'application/octet-stream',
@@ -373,7 +472,7 @@ async function main(): Promise<void> {
         } else {
             console.log(`File doesn't exist, creating new file...`);
 
-            const fileUploader = await client.getFileUploader(rootFolderUid, fileName, metadata);
+            const fileUploader = await client.getFileUploader(targetFolderUid, fileName, metadata);
 
             const nodeStream = createReadStream(localFilePath);
             const webStream = nodeStreamToWebStream(nodeStream);
