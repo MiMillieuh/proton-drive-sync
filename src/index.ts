@@ -47,6 +47,12 @@ const SUB_NAME = 'proton-drive-sync';
 const DEBOUNCE_MS = 500;
 
 // ============================================================================
+// Options
+// ============================================================================
+
+let dryRun = false;
+
+// ============================================================================
 // Watchman Client
 // ============================================================================
 
@@ -80,6 +86,12 @@ async function processChanges(): Promise<void> {
             if (change.exists) {
                 // File or directory was created/modified
                 const typeLabel = change.type === 'd' ? 'directory' : 'file';
+
+                if (dryRun) {
+                    logger.info(`[DRY-RUN] Would create/update ${typeLabel}: ${path}`);
+                    continue;
+                }
+
                 logger.info(`Creating/updating ${typeLabel}: ${path}`);
 
                 const result = await pRetry(
@@ -102,6 +114,11 @@ async function processChanges(): Promise<void> {
                 logger.info(`Success: ${path} -> ${result.nodeUid}`);
             } else {
                 // File or directory was deleted
+                if (dryRun) {
+                    logger.info(`[DRY-RUN] Would delete: ${path}`);
+                    continue;
+                }
+
                 logger.info(`Deleting: ${path}`);
 
                 const result = await pRetry(
@@ -292,9 +309,9 @@ function setupWatchman(): void {
     watchmanClient.on('subscription', (resp: watchman.SubscriptionResponse) => {
         if (resp.subscription !== SUB_NAME) return;
 
-        // Save the clock from this notification for resume capability
+        // Save the clock from this notification for resume capability (skip in dry-run mode)
         const clock = (resp as unknown as { clock?: string }).clock;
-        if (clock) {
+        if (clock && !dryRun) {
             appState.clock = clock;
             saveState(appState);
         }
@@ -340,9 +357,14 @@ async function authCommand(): Promise<void> {
     console.log('Credentials saved to Keychain.');
 }
 
-async function syncCommand(options: { verbose: boolean }): Promise<void> {
+async function syncCommand(options: { verbose: boolean; dryRun: boolean }): Promise<void> {
     if (options.verbose) {
         enableVerbose();
+    }
+
+    if (options.dryRun) {
+        dryRun = true;
+        logger.info('[DRY-RUN] Dry run mode enabled - no changes will be made');
     }
 
     // Authenticate using stored credentials
@@ -374,6 +396,7 @@ program
     .command('sync')
     .description('Watch and sync files to Proton Drive')
     .option('-v, --verbose', 'Enable verbose output to console')
+    .option('-n, --dry-run', 'Show what would be synced without making changes')
     .action(syncCommand);
 
 program.parse();
