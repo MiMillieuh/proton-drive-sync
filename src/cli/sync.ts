@@ -4,6 +4,7 @@
 
 import { realpathSync } from 'fs';
 import { basename } from 'path';
+import { execSync } from 'child_process';
 import watchman from 'fb-watchman';
 import pRetry from 'p-retry';
 import { getStoredCredentials } from '../keychain.js';
@@ -14,6 +15,20 @@ import { createClient } from './auth.js';
 import { createNode } from '../create.js';
 import { deleteNode } from '../delete.js';
 import type { ProtonDriveClient } from '../types.js';
+
+// ============================================================================
+// Watchman Check
+// ============================================================================
+
+function checkWatchmanInstalled(): void {
+    try {
+        execSync('watchman version', { stdio: 'ignore' });
+    } catch {
+        console.error('Error: Watchman is not installed.');
+        console.error('Install it from: https://facebook.github.io/watchman/docs/install');
+        process.exit(1);
+    }
+}
 
 // ============================================================================
 // Types
@@ -389,6 +404,9 @@ export async function syncCommand(options: {
     dryRun: boolean;
     watch: boolean;
 }): Promise<void> {
+    // Check watchman is installed before doing anything
+    checkWatchmanInstalled();
+
     if (options.verbose || options.dryRun) {
         enableVerbose();
     }

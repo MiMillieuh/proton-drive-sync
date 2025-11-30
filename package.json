@@ -7,6 +7,7 @@
         "proton-drive-sync": "./dist/index.js"
     },
     "scripts": {
+        "preinstall": "node -e \"try{require('child_process').execSync('watchman version',{stdio:'ignore'})}catch{console.error('Error: Watchman is required.\\nInstall from: https://facebook.github.io/watchman/docs/install');process.exit(1)}\"",
         "build": "tsc",
         "build:check": "tsc --noEmit",
         "prepare": "husky"

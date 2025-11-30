@@ -5,7 +5,7 @@ A CLI tool that watches local directories and syncs changes to Proton Drive in r
 ## Requirements
 
 - [pnpm](https://pnpm.io/installation)
-- [Watchman](https://facebook.github.io/watchman/docs/install) - `brew install watchman` on macOS
+- [Watchman](https://facebook.github.io/watchman/docs/install)
 
 ## Installation
 
