@@ -107,7 +107,7 @@ async function collectFilesRecursively(client, folderUid, path = '') {
             continue;
         }
 
-        const nodeData = node.data;
+        const nodeData = node.value;
         const fullPath = path ? `${path}/${nodeData.name}` : nodeData.name;
 
         if (nodeData.type === 'folder') {
@@ -204,7 +204,7 @@ async function main() {
         }
 
         const httpClient = createProtonHttpClient(session, { debug: DEBUG });
-        const account = createProtonAccount(session);
+        const account = createProtonAccount(session, { debug: DEBUG });
         const srpModule = createSrpModule();
         const openPGPCryptoModule = createOpenPGPCrypto();
 
@@ -225,7 +225,13 @@ async function main() {
             process.exit(1);
         }
 
-        const files = await collectFilesRecursively(client, rootFolder.data.uid);
+        if (DEBUG) {
+            console.log('\n[DEBUG] Root folder response:');
+            console.log('[DEBUG]   rootFolder.ok:', rootFolder.ok);
+            console.log('[DEBUG]   rootFolder.value:', JSON.stringify(rootFolder.value, null, 2));
+        }
+
+        const files = await collectFilesRecursively(client, rootFolder.value.uid);
 
         console.log('\n=== My Files ===\n');
 

@@ -647,24 +647,50 @@ export class ProtonAuth {
 
             for (const key of address.Keys || []) {
                 const keySalt = keySalts.find(s => s.ID === key.ID);
-                if (keySalt?.KeySalt) {
-                    try {
-                        const keyPassword = await computeKeyPassword(password, keySalt.KeySalt);
+                console.log(`[DEBUG] Address key ${key.ID}:`);
+                console.log(`[DEBUG]   - KeySalt: ${keySalt?.KeySalt ? 'present' : 'missing'}`);
+                console.log(`[DEBUG]   - Token: ${key.Token ? 'present' : 'missing'}`);
+                console.log(`[DEBUG]   - Signature: ${key.Signature ? 'present' : 'missing'}`);
+                
+                try {
+                    let addressKeyPassword;
+                    
+                    // If the key has a Token, decrypt it using the user's primary key
+                    if (key.Token && this.session.primaryKey) {
+                        console.log(`[DEBUG] Decrypting Token with primary key...`);
+                        const decryptedToken = await openpgp.decrypt({
+                            message: await openpgp.readMessage({ armoredMessage: key.Token }),
+                            decryptionKeys: this.session.primaryKey,
+                        });
+                        addressKeyPassword = decryptedToken.data;
+                        console.log(`[DEBUG] Token decrypted successfully`);
+                    } else if (keySalt?.KeySalt) {
+                        // Use password-derived key
+                        addressKeyPassword = await computeKeyPassword(password, keySalt.KeySalt);
+                    } else {
+                        // Fallback to the user's key password
+                        addressKeyPassword = this.session.keyPassword;
+                    }
+                    
+                    if (addressKeyPassword) {
                         const privateKey = await openpgp.readPrivateKey({
                             armoredKey: key.PrivateKey,
                         });
                         const decryptedKey = await openpgp.decryptKey({
                             privateKey,
-                            passphrase: keyPassword,
+                            passphrase: addressKeyPassword,
                         });
                         addressData.keys.push({
                             ID: key.ID,
                             Primary: key.Primary,
                             key: decryptedKey,
                         });
-                    } catch (error) {
-                        console.warn(`Failed to decrypt key ${key.ID}:`, error.message);
+                        console.log(`[DEBUG] Successfully decrypted address key ${key.ID}`);
+                    } else {
+                        console.warn(`[DEBUG] No password available for key ${key.ID}`);
                     }
+                } catch (error) {
+                    console.warn(`[DEBUG] Failed to decrypt address key ${key.ID}:`, error.message);
                 }
             }
 
@@ -831,6 +857,16 @@ export class ProtonAuth {
 export function createProtonHttpClient(session, options = {}) {
     const debug = options.debug || false;
 
+    // Helper to build the full URL - handles both relative and absolute URLs
+    const buildUrl = (url) => {
+        // If URL is already absolute, use it as-is
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            return url;
+        }
+        // Otherwise, prepend the API base URL
+        return `${API_BASE_URL}/${url}`;
+    };
+
     return {
         async fetchJson(request) {
             const { url, method, headers, json, timeoutMs, signal } = request;
@@ -844,7 +880,7 @@ export function createProtonHttpClient(session, options = {}) {
             }
             headers.set('x-pm-appversion', APP_VERSION);
 
-            const fullUrl = `${API_BASE_URL}/${url}`;
+            const fullUrl = buildUrl(url);
 
             if (debug) {
                 console.log('\n[DEBUG] === HTTP Request ===');
@@ -896,7 +932,7 @@ export function createProtonHttpClient(session, options = {}) {
             }
             headers.set('x-pm-appversion', APP_VERSION);
 
-            const fullUrl = `${API_BASE_URL}/${url}`;
+            const fullUrl = buildUrl(url);
 
             if (debug) {
                 console.log('\n[DEBUG] === HTTP Blob Request ===');
@@ -930,9 +966,13 @@ export function createProtonHttpClient(session, options = {}) {
 /**
  * Create a Proton account interface for the SDK
  * @param {Object} session - Auth session
+ * @param {Object} options - Options
+ * @param {boolean} options.debug - Enable debug logging
  * @returns {Object} Account interface compatible with ProtonDriveAccount
  */
-export function createProtonAccount(session) {
+export function createProtonAccount(session, options = {}) {
+    const debug = options.debug || false;
+
     return {
         async getOwnPrimaryAddress() {
             const primaryAddress = session.addresses?.find(a => a.Type === 1 && a.Status === 1);
@@ -941,7 +981,7 @@ export function createProtonAccount(session) {
             }
 
             const primaryKeyIndex = primaryAddress.keys.findIndex(k => k.Primary === 1);
-            return {
+            const result = {
                 email: primaryAddress.Email,
                 addressId: primaryAddress.ID,
                 primaryKeyIndex: primaryKeyIndex >= 0 ? primaryKeyIndex : 0,
@@ -950,6 +990,21 @@ export function createProtonAccount(session) {
                     key: k.key,
                 })),
             };
+
+            if (debug) {
+                console.log('\n[DEBUG] getOwnPrimaryAddress:');
+                console.log('[DEBUG]   email:', result.email);
+                console.log('[DEBUG]   addressId:', result.addressId);
+                console.log('[DEBUG]   keys count:', result.keys.length);
+                result.keys.forEach((k, i) => {
+                    console.log(`[DEBUG]   key[${i}].id:`, k.id);
+                    console.log(`[DEBUG]   key[${i}].key type:`, k.key?.constructor?.name);
+                    console.log(`[DEBUG]   key[${i}].key isPrivate:`, k.key?.isPrivate?.());
+                    console.log(`[DEBUG]   key[${i}].key isDecrypted:`, k.key?.isDecrypted?.());
+                });
+            }
+
+            return result;
         },
 
         async getOwnAddress(emailOrAddressId) {
@@ -961,7 +1016,7 @@ export function createProtonAccount(session) {
             }
 
             const primaryKeyIndex = address.keys.findIndex(k => k.Primary === 1);
-            return {
+            const result = {
                 email: address.Email,
                 addressId: address.ID,
                 primaryKeyIndex: primaryKeyIndex >= 0 ? primaryKeyIndex : 0,
@@ -970,6 +1025,21 @@ export function createProtonAccount(session) {
                     key: k.key,
                 })),
             };
+
+            if (debug) {
+                console.log('\n[DEBUG] getOwnAddress for:', emailOrAddressId);
+                console.log('[DEBUG]   email:', result.email);
+                console.log('[DEBUG]   addressId:', result.addressId);
+                console.log('[DEBUG]   keys count:', result.keys.length);
+                result.keys.forEach((k, i) => {
+                    console.log(`[DEBUG]   key[${i}].id:`, k.id);
+                    console.log(`[DEBUG]   key[${i}].key type:`, k.key?.constructor?.name);
+                    console.log(`[DEBUG]   key[${i}].key isPrivate:`, k.key?.isPrivate?.());
+                    console.log(`[DEBUG]   key[${i}].key isDecrypted:`, k.key?.isDecrypted?.());
+                });
+            }
+
+            return result;
         },
 
         async hasProtonAccount(email) {
