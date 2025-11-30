@@ -111,7 +111,7 @@ async function uploadFile(
     }
 
     // Wait for completion
-    const nodeUid = await uploadController.completion();
+    const { nodeUid } = await uploadController.completion();
     return nodeUid;
 }
 

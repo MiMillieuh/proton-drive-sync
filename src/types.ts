@@ -44,7 +44,7 @@ export interface DeleteResult {
 export interface UploadController {
     pause(): void;
     resume(): void;
-    completion(): Promise<string>;
+    completion(): Promise<{ nodeUid: string; nodeRevisionUid: string }>;
 }
 
 export interface FileUploader {
