@@ -26,7 +26,7 @@
     "files": [
         "dist"
     ],
-    "packageManager": "pnpm@10.23.0",
+    "packageManager": "pnpm@10.24.0",
     "dependencies": {
         "@inquirer/prompts": "^8.0.1",
         "@protontech/drive-sdk": "^0.7.0",

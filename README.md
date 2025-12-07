@@ -21,9 +21,9 @@ npm install -g proton-drive-sync
 proton-drive-sync auth
 ```
 
-### Set Up Service (Optional)
+### Set Up Service (Recommended but Optional)
 
-This installs both Watchman and proton-drive-sync as launchd services that start automatically on boot:
+Install Watchman and proton-drive-sync as launchd services that start automatically on login. The installer prompts you to choose which services to install (accept both unless you have already installed Watchman as a service before).
 
 ```bash
 # Install the service

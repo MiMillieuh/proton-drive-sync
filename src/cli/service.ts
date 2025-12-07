@@ -6,6 +6,21 @@ import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
+import * as readline from 'readline';
+
+function askYesNo(question: string): Promise<boolean> {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+
+    return new Promise((resolve) => {
+        rl.question(`${question} (y/n): `, (answer) => {
+            rl.close();
+            resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+        });
+    });
+}
 
 const PLIST_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
@@ -125,7 +140,7 @@ function unloadService(name: string, plistPath: string): void {
     }
 }
 
-export function serviceInstallCommand(): void {
+export async function serviceInstallCommand(): Promise<void> {
     if (process.platform !== 'darwin') {
         console.error('Error: Service installation is only supported on macOS.');
         process.exit(1);
@@ -139,26 +154,44 @@ export function serviceInstallCommand(): void {
         mkdirSync(PLIST_DIR, { recursive: true });
     }
 
-    // Install watchman service
-    console.log('Installing watchman service...');
-    if (existsSync(WATCHMAN_PLIST_PATH)) {
-        unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-    }
-    writeFileSync(WATCHMAN_PLIST_PATH, generateWatchmanPlist(watchmanPath));
-    console.log(`Created: ${WATCHMAN_PLIST_PATH}`);
-    loadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-    console.log('Watchman service installed and started.');
+    let installedAny = false;
 
-    // Install proton-drive-sync service
-    console.log('\nInstalling proton-drive-sync service...');
-    if (existsSync(PLIST_PATH)) {
-        unloadService(SERVICE_NAME, PLIST_PATH);
+    // Ask about watchman service
+    const installWatchman = await askYesNo('Install watchman service?');
+    if (installWatchman) {
+        console.log('Installing watchman service...');
+        if (existsSync(WATCHMAN_PLIST_PATH)) {
+            unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
+        }
+        writeFileSync(WATCHMAN_PLIST_PATH, generateWatchmanPlist(watchmanPath));
+        console.log(`Created: ${WATCHMAN_PLIST_PATH}`);
+        loadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
+        console.log('Watchman service installed and started.');
+        installedAny = true;
+    } else {
+        console.log('Skipping watchman service.');
     }
-    writeFileSync(PLIST_PATH, generateSyncPlist(binPath));
-    console.log(`Created: ${PLIST_PATH}`);
-    loadService(SERVICE_NAME, PLIST_PATH);
-    console.log('proton-drive-sync service installed and started.');
-    console.log('View logs with: proton-drive-sync logs');
+
+    // Ask about proton-drive-sync service
+    const installSync = await askYesNo('Install proton-drive-sync service?');
+    if (installSync) {
+        console.log('Installing proton-drive-sync service...');
+        if (existsSync(PLIST_PATH)) {
+            unloadService(SERVICE_NAME, PLIST_PATH);
+        }
+        writeFileSync(PLIST_PATH, generateSyncPlist(binPath));
+        console.log(`Created: ${PLIST_PATH}`);
+        loadService(SERVICE_NAME, PLIST_PATH);
+        console.log('proton-drive-sync service installed and started.');
+        console.log('View logs with: proton-drive-sync logs');
+        installedAny = true;
+    } else {
+        console.log('Skipping proton-drive-sync service.');
+    }
+
+    if (!installedAny) {
+        console.log('\nNo services were installed.');
+    }
 }
 
 export function serviceUninstallCommand(): void {
