@@ -10,24 +10,24 @@ import { join } from 'path';
 const STATE_FILE = join(STATE_DIR, 'state.json');
 
 export async function resetCommand(options: { yes: boolean }): Promise<void> {
-    if (!existsSync(STATE_FILE)) {
-        console.log('No state file found. Nothing to reset.');
-        return;
+  if (!existsSync(STATE_FILE)) {
+    console.log('No state file found. Nothing to reset.');
+    return;
+  }
+
+  if (!options.yes) {
+    const confirmed = await confirm({
+      message:
+        'This will reset the sync state, forcing proton-drive-sync to sync all files as if it were first launched. Continue?',
+      default: false,
+    });
+
+    if (!confirmed) {
+      console.log('Aborted.');
+      return;
     }
+  }
 
-    if (!options.yes) {
-        const confirmed = await confirm({
-            message:
-                'This will reset the sync state, forcing proton-drive-sync to sync all files as if it were first launched. Continue?',
-            default: false,
-        });
-
-        if (!confirmed) {
-            console.log('Aborted.');
-            return;
-        }
-    }
-
-    unlinkSync(STATE_FILE);
-    console.log('State reset.');
+  unlinkSync(STATE_FILE);
+  console.log('State reset.');
 }

@@ -17,8 +17,8 @@ import * as schema from './schema.js';
 // ============================================================================
 
 if (!xdgState) {
-    console.error('Could not determine XDG state directory');
-    process.exit(1);
+  console.error('Could not determine XDG state directory');
+  process.exit(1);
 }
 
 export const STATE_DIR = join(xdgState, 'proton-drive-sync');
@@ -29,19 +29,19 @@ const DB_PATH = join(STATE_DIR, 'state.db');
 // ============================================================================
 
 function initializeDatabase() {
-    // Ensure state directory exists
-    if (!existsSync(STATE_DIR)) {
-        mkdirSync(STATE_DIR, { recursive: true });
-    }
+  // Ensure state directory exists
+  if (!existsSync(STATE_DIR)) {
+    mkdirSync(STATE_DIR, { recursive: true });
+  }
 
-    const sqlite = new Database(DB_PATH);
-    const db = drizzle(sqlite, { schema });
+  const sqlite = new Database(DB_PATH);
+  const db = drizzle(sqlite, { schema });
 
-    // Run migrations from the compiled migrations folder
-    const migrationsPath = new URL('./migrations', import.meta.url).pathname;
-    migrate(db, { migrationsFolder: migrationsPath });
+  // Run migrations from the compiled migrations folder
+  const migrationsPath = new URL('./migrations', import.meta.url).pathname;
+  migrate(db, { migrationsFolder: migrationsPath });
 
-    return db;
+  return db;
 }
 
 export const db = initializeDatabase();

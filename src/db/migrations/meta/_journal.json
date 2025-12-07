@@ -1,13 +1,27 @@
 {
-    "version": "7",
-    "dialect": "sqlite",
-    "entries": [
-        {
-            "idx": 0,
-            "version": "6",
-            "when": 1765125923420,
-            "tag": "0000_hot_whizzer",
-            "breakpoints": true
-        }
-    ]
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1765125923420,
+      "tag": "0000_hot_whizzer",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1765126611481,
+      "tag": "0001_unique_invisible_woman",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1765127244619,
+      "tag": "0002_flowery_apocalypse",
+      "breakpoints": true
+    }
+  ]
 }

@@ -12,10 +12,10 @@
 
 import { createReadStream, statSync, Stats } from 'fs';
 import type {
-    CreateProtonDriveClient,
-    UploadMetadata,
-    UploadController,
-    CreateResult,
+  CreateProtonDriveClient,
+  UploadMetadata,
+  UploadController,
+  CreateResult,
 } from './types.js';
 import { parsePath, findFileByName, findFolderByName, nodeStreamToWebStream } from './utils.js';
 
@@ -34,40 +34,40 @@ export type { CreateProtonDriveClient, CreateResult } from './types.js';
  * Once we need to create a folder, all subsequent folders must be created (no more searching).
  */
 async function ensureRemotePath(
-    client: CreateProtonDriveClient,
-    rootFolderUid: string,
-    pathParts: string[]
+  client: CreateProtonDriveClient,
+  rootFolderUid: string,
+  pathParts: string[]
 ): Promise<string> {
-    let currentFolderUid = rootFolderUid;
-    let needToCreate = false;
+  let currentFolderUid = rootFolderUid;
+  let needToCreate = false;
 
-    for (const folderName of pathParts) {
-        if (needToCreate) {
-            // Once we start creating, all subsequent folders need to be created
-            const result = await client.createFolder(currentFolderUid, folderName);
-            if (!result.ok) {
-                throw new Error(`Failed to create folder "${folderName}": ${result.error}`);
-            }
-            currentFolderUid = result.value!.uid;
-        } else {
-            // Search for existing folder
-            const existingFolderUid = await findFolderByName(client, currentFolderUid, folderName);
+  for (const folderName of pathParts) {
+    if (needToCreate) {
+      // Once we start creating, all subsequent folders need to be created
+      const result = await client.createFolder(currentFolderUid, folderName);
+      if (!result.ok) {
+        throw new Error(`Failed to create folder "${folderName}": ${result.error}`);
+      }
+      currentFolderUid = result.value!.uid;
+    } else {
+      // Search for existing folder
+      const existingFolderUid = await findFolderByName(client, currentFolderUid, folderName);
 
-            if (existingFolderUid) {
-                currentFolderUid = existingFolderUid;
-            } else {
-                // Folder doesn't exist, create it and all subsequent folders
-                const result = await client.createFolder(currentFolderUid, folderName);
-                if (!result.ok) {
-                    throw new Error(`Failed to create folder "${folderName}": ${result.error}`);
-                }
-                currentFolderUid = result.value!.uid;
-                needToCreate = true; // All subsequent folders must be created
-            }
+      if (existingFolderUid) {
+        currentFolderUid = existingFolderUid;
+      } else {
+        // Folder doesn't exist, create it and all subsequent folders
+        const result = await client.createFolder(currentFolderUid, folderName);
+        if (!result.ok) {
+          throw new Error(`Failed to create folder "${folderName}": ${result.error}`);
         }
+        currentFolderUid = result.value!.uid;
+        needToCreate = true; // All subsequent folders must be created
+      }
     }
+  }
 
-    return currentFolderUid;
+  return currentFolderUid;
 }
 
 // ============================================================================
@@ -75,44 +75,44 @@ async function ensureRemotePath(
 // ============================================================================
 
 async function uploadFile(
-    client: CreateProtonDriveClient,
-    targetFolderUid: string,
-    localFilePath: string,
-    fileName: string,
-    fileStat: Stats
+  client: CreateProtonDriveClient,
+  targetFolderUid: string,
+  localFilePath: string,
+  fileName: string,
+  fileStat: Stats
 ): Promise<string> {
-    const fileSize = Number(fileStat.size);
+  const fileSize = Number(fileStat.size);
 
-    // Check if file already exists in the target folder
-    const existingFileUid = await findFileByName(client, targetFolderUid, fileName);
+  // Check if file already exists in the target folder
+  const existingFileUid = await findFileByName(client, targetFolderUid, fileName);
 
-    const metadata: UploadMetadata = {
-        mediaType: 'application/octet-stream',
-        expectedSize: fileSize,
-        modificationTime: fileStat.mtime,
-    };
+  const metadata: UploadMetadata = {
+    mediaType: 'application/octet-stream',
+    expectedSize: fileSize,
+    modificationTime: fileStat.mtime,
+  };
 
-    let uploadController: UploadController;
+  let uploadController: UploadController;
 
-    if (existingFileUid) {
-        const revisionUploader = await client.getFileRevisionUploader(existingFileUid, metadata);
+  if (existingFileUid) {
+    const revisionUploader = await client.getFileRevisionUploader(existingFileUid, metadata);
 
-        const nodeStream = createReadStream(localFilePath);
-        const webStream = nodeStreamToWebStream(nodeStream);
+    const nodeStream = createReadStream(localFilePath);
+    const webStream = nodeStreamToWebStream(nodeStream);
 
-        uploadController = await revisionUploader.uploadFromStream(webStream, []);
-    } else {
-        const fileUploader = await client.getFileUploader(targetFolderUid, fileName, metadata);
+    uploadController = await revisionUploader.uploadFromStream(webStream, []);
+  } else {
+    const fileUploader = await client.getFileUploader(targetFolderUid, fileName, metadata);
 
-        const nodeStream = createReadStream(localFilePath);
-        const webStream = nodeStreamToWebStream(nodeStream);
+    const nodeStream = createReadStream(localFilePath);
+    const webStream = nodeStreamToWebStream(nodeStream);
 
-        uploadController = await fileUploader.uploadFromStream(webStream, []);
-    }
+    uploadController = await fileUploader.uploadFromStream(webStream, []);
+  }
 
-    // Wait for completion
-    const { nodeUid } = await uploadController.completion();
-    return nodeUid;
+  // Wait for completion
+  const { nodeUid } = await uploadController.completion();
+  return nodeUid;
 }
 
 // ============================================================================
@@ -120,22 +120,22 @@ async function uploadFile(
 // ============================================================================
 
 async function createDirectory(
-    client: CreateProtonDriveClient,
-    targetFolderUid: string,
-    dirName: string
+  client: CreateProtonDriveClient,
+  targetFolderUid: string,
+  dirName: string
 ): Promise<string> {
-    // Check if directory already exists
-    const existingFolderUid = await findFolderByName(client, targetFolderUid, dirName);
+  // Check if directory already exists
+  const existingFolderUid = await findFolderByName(client, targetFolderUid, dirName);
 
-    if (existingFolderUid) {
-        return existingFolderUid;
-    } else {
-        const result = await client.createFolder(targetFolderUid, dirName);
-        if (!result.ok) {
-            throw new Error(`Failed to create directory "${dirName}": ${result.error}`);
-        }
-        return result.value!.uid;
+  if (existingFolderUid) {
+    return existingFolderUid;
+  } else {
+    const result = await client.createFolder(targetFolderUid, dirName);
+    if (!result.ok) {
+      throw new Error(`Failed to create directory "${dirName}": ${result.error}`);
     }
+    return result.value!.uid;
+  }
 }
 
 // ============================================================================
@@ -151,66 +151,66 @@ async function createDirectory(
  * @returns CreateResult with success status and node UID
  */
 export async function createNode(
-    client: CreateProtonDriveClient,
-    localPath: string,
-    remotePath: string
+  client: CreateProtonDriveClient,
+  localPath: string,
+  remotePath: string
 ): Promise<CreateResult> {
-    // Check if path exists locally
-    let pathStat: Stats | null = null;
-    let isDirectory = false;
+  // Check if path exists locally
+  let pathStat: Stats | null = null;
+  let isDirectory = false;
 
-    try {
-        pathStat = statSync(localPath);
-        isDirectory = pathStat.isDirectory();
-    } catch {
-        // Path doesn't exist locally - treat as directory creation if ends with /
-        if (remotePath.endsWith('/')) {
-            isDirectory = true;
-        } else {
-            return {
-                success: false,
-                error: `Local path not found: ${localPath}. For creating a new directory, add a trailing slash to remotePath.`,
-                isDirectory: false,
-            };
-        }
+  try {
+    pathStat = statSync(localPath);
+    isDirectory = pathStat.isDirectory();
+  } catch {
+    // Path doesn't exist locally - treat as directory creation if ends with /
+    if (remotePath.endsWith('/')) {
+      isDirectory = true;
+    } else {
+      return {
+        success: false,
+        error: `Local path not found: ${localPath}. For creating a new directory, add a trailing slash to remotePath.`,
+        isDirectory: false,
+      };
     }
+  }
 
-    const { parentParts, name } = parsePath(remotePath);
+  const { parentParts, name } = parsePath(remotePath);
 
-    // Get root folder
-    const rootFolder = await client.getMyFilesRootFolder();
+  // Get root folder
+  const rootFolder = await client.getMyFilesRootFolder();
 
-    if (!rootFolder.ok) {
-        return {
-            success: false,
-            error: `Failed to get root folder: ${rootFolder.error}`,
-            isDirectory,
-        };
+  if (!rootFolder.ok) {
+    return {
+      success: false,
+      error: `Failed to get root folder: ${rootFolder.error}`,
+      isDirectory,
+    };
+  }
+
+  const rootFolderUid = rootFolder.value!.uid;
+
+  // Ensure parent directories exist
+  let targetFolderUid = rootFolderUid;
+
+  if (parentParts.length > 0) {
+    targetFolderUid = await ensureRemotePath(client, rootFolderUid, parentParts);
+  }
+
+  // Create file or directory
+  try {
+    if (isDirectory) {
+      const nodeUid = await createDirectory(client, targetFolderUid, name);
+      return { success: true, nodeUid, isDirectory: true };
+    } else {
+      const nodeUid = await uploadFile(client, targetFolderUid, localPath, name, pathStat!);
+      return { success: true, nodeUid, isDirectory: false };
     }
-
-    const rootFolderUid = rootFolder.value!.uid;
-
-    // Ensure parent directories exist
-    let targetFolderUid = rootFolderUid;
-
-    if (parentParts.length > 0) {
-        targetFolderUid = await ensureRemotePath(client, rootFolderUid, parentParts);
-    }
-
-    // Create file or directory
-    try {
-        if (isDirectory) {
-            const nodeUid = await createDirectory(client, targetFolderUid, name);
-            return { success: true, nodeUid, isDirectory: true };
-        } else {
-            const nodeUid = await uploadFile(client, targetFolderUid, localPath, name, pathStat!);
-            return { success: true, nodeUid, isDirectory: false };
-        }
-    } catch (error) {
-        return {
-            success: false,
-            error: (error as Error).message,
-            isDirectory,
-        };
-    }
+  } catch (error) {
+    return {
+      success: false,
+      error: (error as Error).message,
+      isDirectory,
+    };
+  }
 }

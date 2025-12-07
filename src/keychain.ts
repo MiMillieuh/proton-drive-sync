@@ -14,54 +14,54 @@ const keychainSetPassword = promisify(keychain.setPassword).bind(keychain);
 const keychainDeletePassword = promisify(keychain.deletePassword).bind(keychain);
 
 export interface StoredCredentials {
-    username: string;
-    password: string;
+  username: string;
+  password: string;
 }
 
 export async function getStoredCredentials(): Promise<StoredCredentials | null> {
-    try {
-        const username = await keychainGetPassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-            service: KEYCHAIN_SERVICE,
-        });
-        const pwd = await keychainGetPassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-            service: KEYCHAIN_SERVICE,
-        });
-        return { username, password: pwd };
-    } catch {
-        return null;
-    }
+  try {
+    const username = await keychainGetPassword({
+      account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
+      service: KEYCHAIN_SERVICE,
+    });
+    const pwd = await keychainGetPassword({
+      account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
+      service: KEYCHAIN_SERVICE,
+    });
+    return { username, password: pwd };
+  } catch {
+    return null;
+  }
 }
 
 export async function storeCredentials(username: string, pwd: string): Promise<void> {
-    await keychainSetPassword({
-        account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-        service: KEYCHAIN_SERVICE,
-        password: username,
-    });
-    await keychainSetPassword({
-        account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-        service: KEYCHAIN_SERVICE,
-        password: pwd,
-    });
+  await keychainSetPassword({
+    account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
+    service: KEYCHAIN_SERVICE,
+    password: username,
+  });
+  await keychainSetPassword({
+    account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
+    service: KEYCHAIN_SERVICE,
+    password: pwd,
+  });
 }
 
 export async function deleteStoredCredentials(): Promise<void> {
-    try {
-        await keychainDeletePassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
-            service: KEYCHAIN_SERVICE,
-        });
-    } catch {
-        // Ignore
-    }
-    try {
-        await keychainDeletePassword({
-            account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
-            service: KEYCHAIN_SERVICE,
-        });
-    } catch {
-        // Ignore
-    }
+  try {
+    await keychainDeletePassword({
+      account: `${KEYCHAIN_ACCOUNT_PREFIX}username`,
+      service: KEYCHAIN_SERVICE,
+    });
+  } catch {
+    // Ignore
+  }
+  try {
+    await keychainDeletePassword({
+      account: `${KEYCHAIN_ACCOUNT_PREFIX}password`,
+      service: KEYCHAIN_SERVICE,
+    });
+  } catch {
+    // Ignore
+  }
 }

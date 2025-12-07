@@ -6,50 +6,32 @@ import { realpathSync } from 'fs';
 import { basename } from 'path';
 import { execSync } from 'child_process';
 import watchman from 'fb-watchman';
-import pRetry from 'p-retry';
-import { getStoredCredentials } from '../keychain.js';
 import { getClock, setClock } from '../state.js';
 import { loadConfig, type Config } from '../config.js';
 import { logger, enableVerbose } from '../logger.js';
-import { createClient } from './auth.js';
-import { createNode } from '../create.js';
+import { authenticateFromKeychain } from './auth.js';
 import { hasSignal, consumeSignal, isAlreadyRunning } from '../signals.js';
-import { deleteNode } from '../delete.js';
+import { enqueueJob, processAllPendingJobs } from '../jobs.js';
+import { SyncEventType } from '../db/schema.js';
 import type { ProtonDriveClient } from '../types.js';
-
-// ============================================================================
-// Watchman Check
-// ============================================================================
-
-async function waitForWatchman(maxAttempts = 30, delayMs = 1000): Promise<void> {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            execSync('watchman version', { stdio: 'ignore' });
-            return;
-        } catch {
-            if (attempt === maxAttempts) {
-                console.error('Error: Watchman failed to start.');
-                console.error('Install it from: https://facebook.github.io/watchman/docs/install');
-                process.exit(1);
-            }
-            logger.debug(`Waiting for watchman to start (attempt ${attempt}/${maxAttempts})...`);
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
-    }
-}
 
 // ============================================================================
 // Types
 // ============================================================================
 
 interface FileChange {
-    name: string;
-    size: number;
-    mtime_ms: number;
-    exists: boolean;
-    type: 'f' | 'd';
-    watchRoot: string; // Which watch root this change came from
-    clock?: string; // The clock value to save after processing this change (daemon mode)
+  name: string;
+  size: number;
+  mtime_ms: number;
+  exists: boolean;
+  type: 'f' | 'd';
+  watchRoot: string; // Which watch root this change came from
+  clock?: string; // The clock value to save after processing this change (daemon mode)
+}
+
+interface WatchmanQueryResponse {
+  clock: string;
+  files: Omit<FileChange, 'watchRoot' | 'clock'>[];
 }
 
 // ============================================================================
@@ -62,22 +44,12 @@ const SUB_NAME = 'proton-drive-sync';
 const DEBOUNCE_MS = 500;
 
 // ============================================================================
-// Options
+// Options & State
 // ============================================================================
 
 let dryRun = false;
 let watchMode = false;
 let remoteRoot = '';
-
-// ============================================================================
-// Watchman Client
-// ============================================================================
-
-const watchmanClient = new watchman.Client();
-
-// ============================================================================
-// Change Queue & Processing
-// ============================================================================
 
 // Queue of pending changes (path -> latest change info)
 const pendingChanges = new Map<string, FileChange>();
@@ -85,326 +57,301 @@ let debounceTimer: NodeJS.Timeout | null = null;
 let protonClient: ProtonDriveClient | null = null;
 let isProcessing = false;
 
-// Track completion for one-shot mode
-let pendingQueries = 0;
-let oneShotResolve: (() => void) | null = null;
+// ============================================================================
+// Watchman Client
+// ============================================================================
 
-/**
- * Save clock for a change if in daemon mode and clock is present
- */
-function saveClockIfNeeded(change: FileChange): void {
-    if (watchMode && change.clock && !dryRun) {
-        setClock(change.watchRoot, change.clock);
+const watchmanClient = new watchman.Client();
+
+/** Wait for Watchman to be available, retrying with delay */
+async function waitForWatchman(maxAttempts = 30, delayMs = 1000): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      execSync('watchman version', { stdio: 'ignore' });
+      return;
+    } catch {
+      if (attempt === maxAttempts) {
+        console.error('Error: Watchman failed to start.');
+        console.error('Install it from: https://facebook.github.io/watchman/docs/install');
+        process.exit(1);
+      }
+      logger.debug(`Waiting for watchman to start (attempt ${attempt}/${maxAttempts})...`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+  }
 }
+
+// ============================================================================
+// Change Queue & Processing
+// ============================================================================
 
 async function processChanges(): Promise<void> {
-    if (isProcessing || !protonClient) return;
-    isProcessing = true;
+  if (isProcessing || !protonClient) return;
+  isProcessing = true;
 
-    // Take snapshot of current pending changes
-    const changes = new Map(pendingChanges);
-    pendingChanges.clear();
+  // Take snapshot of current pending changes
+  const changes = new Map(pendingChanges);
+  pendingChanges.clear();
 
-    for (const [path, change] of changes) {
-        // Build local path (where to read from)
-        const localPath = `${change.watchRoot}/${path}`;
-        // Build remote path (where to upload to on Proton Drive)
-        const dirName = basename(change.watchRoot);
-        const remotePath = remoteRoot ? `${remoteRoot}/${dirName}/${path}` : `${dirName}/${path}`;
+  // Process all changes
+  for (const [path, change] of changes) {
+    // Build local path (where to read from)
+    const localPath = `${change.watchRoot}/${path}`;
+    // Build remote path (where to upload to on Proton Drive)
+    const dirName = basename(change.watchRoot);
+    const remotePath = remoteRoot ? `${remoteRoot}/${dirName}/${path}` : `${dirName}/${path}`;
 
-        try {
-            if (change.exists) {
-                // File or directory was created/modified
-                const typeLabel = change.type === 'd' ? 'directory' : 'file';
-
-                if (dryRun) {
-                    logger.info(`[DRY-RUN] Would create/update ${typeLabel}: ${path}`);
-                    continue;
-                }
-
-                logger.info(`Creating/updating ${typeLabel}: ${path}`);
-
-                const result = await pRetry(
-                    async () => {
-                        const res = await createNode(protonClient!, localPath, remotePath);
-                        if (!res.success) {
-                            throw new Error(res.error);
-                        }
-                        return res;
-                    },
-                    {
-                        retries: 3,
-                        onFailedAttempt: (ctx) => {
-                            logger.warn(
-                                `Create attempt ${ctx.attemptNumber} failed for ${remotePath}: ${ctx.error.message}. ${ctx.retriesLeft} retries left.`
-                            );
-                        },
-                    }
-                );
-                logger.info(`Success: ${path} -> ${result.nodeUid}`);
-                saveClockIfNeeded(change);
-            } else {
-                // File or directory was deleted
-                if (dryRun) {
-                    logger.info(`[DRY-RUN] Would delete: ${path}`);
-                    continue;
-                }
-
-                logger.info(`Deleting: ${path}`);
-
-                const result = await pRetry(
-                    async () => {
-                        const res = await deleteNode(protonClient!, remotePath, false);
-                        if (!res.success) {
-                            throw new Error(res.error);
-                        }
-                        return res;
-                    },
-                    {
-                        retries: 3,
-                        onFailedAttempt: (ctx) => {
-                            logger.warn(
-                                `Delete attempt ${ctx.attemptNumber} failed for ${remotePath}: ${ctx.error.message}. ${ctx.retriesLeft} retries left.`
-                            );
-                        },
-                    }
-                );
-                if (result.existed) {
-                    logger.info(`Deleted: ${path}`);
-                } else {
-                    logger.info(`Already gone: ${path}`);
-                }
-                saveClockIfNeeded(change);
-            }
-        } catch (error) {
-            // All retries exhausted - log error and continue, still save clock to avoid retrying forever
-            logger.error(`Failed after 3 retries for ${path}: ${(error as Error).message}`);
-            saveClockIfNeeded(change);
-        }
+    // Determine event type
+    let eventType: SyncEventType;
+    if (!change.exists) {
+      eventType = SyncEventType.DELETE;
+    } else if (change.type === 'd') {
+      eventType = SyncEventType.CREATE;
+    } else {
+      // For files, we treat both create and modify as UPDATE
+      // (createNode handles both cases)
+      eventType = SyncEventType.UPDATE;
     }
 
-    isProcessing = false;
+    const typeLabel = change.type === 'd' ? 'directory' : 'file';
 
-    // If more changes came in while processing, schedule another run
-    if (pendingChanges.size > 0) {
-        scheduleProcessing();
-    } else if (!watchMode && oneShotResolve) {
-        // One-shot mode: resolve when all changes processed
-        oneShotResolve();
-    }
-}
+    logger.debug(`Enqueueing ${eventType} job for ${typeLabel}: ${path}`);
 
-function scheduleProcessing(): void {
-    if (debounceTimer) {
-        clearTimeout(debounceTimer);
-    }
-    debounceTimer = setTimeout(() => {
-        debounceTimer = null;
-        processChanges();
-    }, DEBOUNCE_MS);
-}
+    enqueueJob(
+      {
+        eventType,
+        localPath,
+        remotePath,
+      },
+      dryRun
+    );
+  }
 
-function queueChange(file: FileChange): void {
-    const status = file.exists ? (file.type === 'd' ? 'dir changed' : 'changed') : 'deleted';
-    const typeLabel = file.type === 'd' ? 'dir' : 'file';
-    logger.debug(`[${status}] ${file.name} (size: ${file.size ?? 0}, type: ${typeLabel})`);
+  // Process all pending jobs from the queue
+  const processed = await processAllPendingJobs(protonClient, dryRun);
+  if (processed > 0) {
+    logger.info(`Processed ${processed} sync job(s)`);
+  }
 
-    pendingChanges.set(file.name, file);
+  isProcessing = false;
+
+  // If more changes came in while processing, schedule another run
+  if (pendingChanges.size > 0) {
     scheduleProcessing();
+  }
 }
-
-// ============================================================================
-// Authentication
-// ============================================================================
 
 /**
- * Authenticate using stored credentials (for sync command)
+ * Debounce file change processing.
+ *
+ * When multiple file changes arrive in quick succession (e.g., editor saving
+ * multiple files, or a bulk copy operation), this ensures we only process
+ * once after the activity settles. Each call resets the timer, so
+ * processChanges() only fires after DEBOUNCE_MS of inactivity.
  */
-async function authenticateFromKeychain(): Promise<ProtonDriveClient> {
-    const storedCreds = await getStoredCredentials();
+function scheduleProcessing(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+  }
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    processChanges();
+  }, DEBOUNCE_MS);
+}
 
-    if (!storedCreds) {
-        logger.error('No credentials found. Run `proton-drive-sync auth` first.');
-        process.exit(1);
-    }
+function queueChange(file: FileChange, schedule: boolean): void {
+  const status = file.exists ? (file.type === 'd' ? 'dir changed' : 'changed') : 'deleted';
+  const typeLabel = file.type === 'd' ? 'dir' : 'file';
+  logger.debug(`[${status}] ${file.name} (size: ${file.size ?? 0}, type: ${typeLabel})`);
 
-    logger.info(`Authenticating as ${storedCreds.username}...`);
-    const client = await createClient(storedCreds.username, storedCreds.password);
-    logger.info('Authenticated.');
+  pendingChanges.set(file.name, file);
+  if (schedule) {
+    scheduleProcessing();
+  }
+}
 
-    return client;
+// ============================================================================
+// Watchman Helpers (promisified)
+// ============================================================================
+
+/** Promisified wrapper for Watchman watch-project command */
+function registerWithWatchman(dir: string): Promise<watchman.WatchProjectResponse> {
+  return new Promise((resolve, reject) => {
+    watchmanClient.command(['watch-project', dir], (err, resp) => {
+      if (err) reject(err);
+      else resolve(resp as watchman.WatchProjectResponse);
+    });
+  });
+}
+
+/** Promisified wrapper for Watchman query command */
+function queryWatchman(
+  root: string,
+  query: Record<string, unknown>
+): Promise<WatchmanQueryResponse> {
+  return new Promise((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (watchmanClient as any).command(
+      ['query', root, query],
+      (err: Error | null, resp: WatchmanQueryResponse) => {
+        if (err) reject(err);
+        else resolve(resp);
+      }
+    );
+  });
+}
+
+/** Promisified wrapper for Watchman subscribe command */
+function subscribeWatchman(
+  root: string,
+  subName: string,
+  sub: Record<string, unknown>
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (watchmanClient as any).command(['subscribe', root, subName, sub], (err: Error | null) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+/** Build a Watchman query/subscription object */
+function buildWatchmanQuery(savedClock: string | null, relative: string): Record<string, unknown> {
+  const query: Record<string, unknown> = {
+    expression: ['anyof', ['type', 'f'], ['type', 'd']],
+    fields: ['name', 'size', 'mtime_ms', 'exists', 'type'],
+  };
+
+  if (savedClock) {
+    query.since = savedClock;
+  }
+
+  if (relative) {
+    query.relative_root = relative;
+  }
+
+  return query;
 }
 
 // ============================================================================
 // One-shot Sync (query mode)
 // ============================================================================
 
-function runOneShotSync(config: Config): Promise<void> {
-    return new Promise((resolve) => {
-        oneShotResolve = resolve;
-        pendingQueries = config.sync_dirs.length;
+/**
+ * Run a one-shot sync for all configured directories.
+ * Uses Promise.all to query all directories concurrently, then processes changes.
+ */
+async function runOneShotSync(config: Config): Promise<void> {
+  // Query all directories concurrently
+  await Promise.all(
+    config.sync_dirs.map(async (dir) => {
+      const watchDir = realpathSync(dir);
 
-        for (const dir of config.sync_dirs) {
-            const watchDir = realpathSync(dir);
+      // Register directory with Watchman
+      const watchResp = await registerWithWatchman(watchDir);
+      // Watchman may watch a parent dir; root is the actual watch, relative is our target within it
+      const root = watchResp.watch;
+      const relative = watchResp.relative_path || '';
 
-            watchmanClient.command(['watch-project', watchDir], (err, resp) => {
-                if (err) {
-                    logger.error(`Watchman error for ${dir}: ${err}`);
-                    process.exit(1);
-                }
+      const savedClock = getClock(watchDir);
 
-                const watchResp = resp as watchman.WatchProjectResponse;
-                const root = watchResp.watch;
-                const relative = watchResp.relative_path || '';
+      if (savedClock) {
+        logger.info(`Syncing changes since last run for ${dir}...`);
+      } else {
+        logger.info(`First run - syncing all existing files in ${dir}...`);
+      }
 
-                const savedClock = getClock(watchDir);
+      const query = buildWatchmanQuery(savedClock, relative);
+      const resp = await queryWatchman(root, query);
 
-                if (savedClock) {
-                    logger.info(`Syncing changes since last run for ${dir}...`);
-                } else {
-                    logger.info(`First run - syncing all existing files in ${dir}...`);
-                }
+      // Save clock
+      if (resp.clock) {
+        setClock(watchDir, resp.clock, dryRun);
+      }
 
-                // Build query
-                const query: Record<string, unknown> = {
-                    expression: ['anyof', ['type', 'f'], ['type', 'd']],
-                    fields: ['name', 'size', 'mtime_ms', 'exists', 'type'],
-                };
+      // Queue changes (don't schedule processing - we'll call processChanges directly after)
+      const files = resp.files || [];
+      for (const file of files) {
+        const fileChange = file as Omit<FileChange, 'watchRoot'>;
+        queueChange({ ...fileChange, watchRoot: watchDir }, false);
+      }
+    })
+  );
 
-                if (savedClock) {
-                    query.since = savedClock;
-                }
+  // Process all queued changes
+  if (pendingChanges.size === 0) {
+    logger.info('No changes to sync.');
+    return;
+  }
 
-                if (relative) {
-                    query.relative_root = relative;
-                }
-
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (watchmanClient as any).command(
-                    ['query', root, query],
-                    (err: Error | null, resp: any) => {
-                        if (err) {
-                            logger.error(`Query error for ${dir}: ${err}`);
-                            process.exit(1);
-                        }
-
-                        // Save clock
-                        if (resp.clock && !dryRun) {
-                            setClock(watchDir, resp.clock);
-                        }
-
-                        // Queue changes
-                        const files = resp.files || [];
-                        for (const file of files) {
-                            const fileChange = file as Omit<FileChange, 'watchRoot'>;
-                            queueChange({ ...fileChange, watchRoot: watchDir });
-                        }
-
-                        pendingQueries--;
-
-                        // If no changes and all queries done, resolve
-                        if (pendingQueries === 0 && pendingChanges.size === 0 && !isProcessing) {
-                            logger.info('No changes to sync.');
-                            resolve();
-                        }
-                    }
-                );
-            });
-        }
-    });
+  await processChanges();
 }
 
 // ============================================================================
 // Daemon Mode (subscription mode)
 // ============================================================================
 
-function setupWatchmanDaemon(config: Config): void {
-    // Set up watches for all configured directories
-    for (const dir of config.sync_dirs) {
-        const watchDir = realpathSync(dir);
-        const subName = `${SUB_NAME}-${basename(watchDir)}`;
+async function setupWatchmanDaemon(config: Config): Promise<void> {
+  // Set up watches for all configured directories
+  await Promise.all(
+    config.sync_dirs.map(async (dir) => {
+      const watchDir = realpathSync(dir);
+      const subName = `${SUB_NAME}-${basename(watchDir)}`;
 
-        // Step 1: Find root (watch-project)
-        watchmanClient.command(['watch-project', watchDir], (err, resp) => {
-            if (err) {
-                logger.error(`Watchman error for ${dir}: ${err}`);
-                process.exit(1);
-            }
+      // Register directory with Watchman
+      const watchResp = await registerWithWatchman(watchDir);
+      // Watchman may watch a parent dir; root is the actual watch, relative is our target within it
+      const root = watchResp.watch;
+      const relative = watchResp.relative_path || '';
 
-            const watchResp = resp as watchman.WatchProjectResponse;
-            const root = watchResp.watch;
-            const relative = watchResp.relative_path || '';
+      // Use saved clock for this directory or null for initial sync
+      const savedClock = getClock(watchDir);
 
-            // Step 2: Use saved clock for this directory or null for initial sync
-            const savedClock = getClock(watchDir);
+      if (savedClock) {
+        logger.info(`Resuming ${dir} from last sync state...`);
+      } else {
+        logger.info(`First run - syncing all existing files in ${dir}...`);
+      }
 
-            if (savedClock) {
-                logger.info(`Resuming ${dir} from last sync state...`);
-            } else {
-                logger.info(`First run - syncing all existing files in ${dir}...`);
-            }
+      const sub = buildWatchmanQuery(savedClock, relative);
 
-            // Step 3: Build a subscription query
-            const sub: Record<string, unknown> = {
-                expression: ['anyof', ['type', 'f'], ['type', 'd']], // files and directories
-                fields: ['name', 'size', 'mtime_ms', 'exists', 'type'],
-            };
+      // Register subscription
+      await subscribeWatchman(root, subName, sub);
+      logger.info(`Watching ${dir} for changes...`);
+    })
+  );
 
-            // Only set 'since' if we have a saved clock (otherwise get all files)
-            if (savedClock) {
-                sub.since = savedClock;
-            }
+  // Listen for notifications from all subscriptions
+  watchmanClient.on('subscription', (resp: watchman.SubscriptionResponse) => {
+    // Check if this is one of our subscriptions
+    if (!resp.subscription.startsWith(SUB_NAME)) return;
 
-            if (relative) {
-                sub.relative_root = relative;
-            }
+    // Extract the watch root from the subscription name
+    const dirName = resp.subscription.replace(`${SUB_NAME}-`, '');
+    const watchRoot = config.sync_dirs.find((d) => basename(realpathSync(d)) === dirName) || '';
 
-            // Step 4: Register subscription
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (watchmanClient as any).command(
-                ['subscribe', root, subName, sub],
-                (err: Error | null) => {
-                    if (err) {
-                        logger.error(`Subscribe error for ${dir}: ${err}`);
-                        process.exit(1);
-                    }
-                    logger.info(`Watching ${dir} for changes...`);
-                }
-            );
-        });
+    if (!watchRoot) {
+      logger.error(`Could not find watch root for subscription: ${resp.subscription}`);
+      return;
     }
 
-    // Step 5: Listen for notifications from all subscriptions
-    watchmanClient.on('subscription', (resp: watchman.SubscriptionResponse) => {
-        // Check if this is one of our subscriptions
-        if (!resp.subscription.startsWith(SUB_NAME)) return;
+    const resolvedRoot = realpathSync(watchRoot);
 
-        // Extract the watch root from the subscription name
-        const dirName = resp.subscription.replace(`${SUB_NAME}-`, '');
-        const watchRoot = config.sync_dirs.find((d) => basename(realpathSync(d)) === dirName) || '';
+    // Get clock from this notification (will be saved after each file is processed)
+    const clock = (resp as unknown as { clock?: string }).clock;
 
-        if (!watchRoot) {
-            logger.error(`Could not find watch root for subscription: ${resp.subscription}`);
-            return;
-        }
+    for (const file of resp.files) {
+      const fileChange = file as unknown as Omit<FileChange, 'watchRoot' | 'clock'>;
+      queueChange({ ...fileChange, watchRoot: resolvedRoot, clock }, true);
+    }
+  });
 
-        const resolvedRoot = realpathSync(watchRoot);
+  // Handle errors & shutdown
+  watchmanClient.on('error', (e: Error) => logger.error(`Watchman error: ${e}`));
+  watchmanClient.on('end', () => {});
 
-        // Get clock from this notification (will be saved after each file is processed)
-        const clock = (resp as unknown as { clock?: string }).clock;
-
-        for (const file of resp.files) {
-            const fileChange = file as unknown as Omit<FileChange, 'watchRoot' | 'clock'>;
-            queueChange({ ...fileChange, watchRoot: resolvedRoot, clock });
-        }
-    });
-
-    // Step 6: Handle errors & shutdown
-    watchmanClient.on('error', (e: Error) => logger.error(`Watchman error: ${e}`));
-    watchmanClient.on('end', () => {});
-
-    logger.info('Watching for file changes... (press Ctrl+C to exit)');
+  logger.info('Watching for file changes... (press Ctrl+C to exit)');
 }
 
 // ============================================================================
@@ -412,73 +359,73 @@ function setupWatchmanDaemon(config: Config): void {
 // ============================================================================
 
 export async function startCommand(options: {
-    verbose: boolean;
-    dryRun: boolean;
-    watch: boolean;
-    daemon: boolean;
+  verbose: boolean;
+  dryRun: boolean;
+  watch: boolean;
+  daemon: boolean;
 }): Promise<void> {
-    // Validate: --daemon requires --watch
-    if (options.daemon && !options.watch) {
-        console.error('Error: --daemon (-d) requires --watch (-w)');
-        process.exit(1);
-    }
+  // Validate: --daemon requires --watch
+  if (options.daemon && !options.watch) {
+    console.error('Error: --daemon (-d) requires --watch (-w)');
+    process.exit(1);
+  }
 
-    // Wait for watchman to be ready
-    await waitForWatchman();
+  // Wait for watchman to be ready
+  await waitForWatchman();
 
-    // Check if another proton-drive-sync instance is already running
-    if (isAlreadyRunning(true)) {
-        console.error(
-            'Error: Another proton-drive-sync instance is already running. Run `proton-drive-sync stop` first.'
-        );
-        process.exit(1);
-    }
+  // Check if another proton-drive-sync instance is already running
+  if (isAlreadyRunning(true)) {
+    console.error(
+      'Error: Another proton-drive-sync instance is already running. Run `proton-drive-sync stop` first.'
+    );
+    process.exit(1);
+  }
 
-    if (options.verbose || options.dryRun) {
-        enableVerbose();
-    }
+  if (options.verbose || options.dryRun) {
+    enableVerbose();
+  }
 
-    if (options.dryRun) {
-        dryRun = true;
-        logger.info('[DRY-RUN] Dry run mode enabled - no changes will be made');
-    }
+  if (options.dryRun) {
+    dryRun = true;
+    logger.info('[DRY-RUN] Dry run mode enabled - no changes will be made');
+  }
 
-    watchMode = options.watch;
+  watchMode = options.watch;
 
-    // Load config
-    const config = loadConfig();
+  // Load config
+  const config = loadConfig();
 
-    // Set remote root from config
-    remoteRoot = config.remote_root;
+  // Set remote root from config
+  remoteRoot = config.remote_root;
 
-    // Authenticate using stored credentials
-    protonClient = await authenticateFromKeychain();
+  // Authenticate using stored credentials
+  protonClient = await authenticateFromKeychain();
 
-    if (watchMode) {
-        // Watch mode: use subscriptions and keep running
-        setupWatchmanDaemon(config);
+  if (watchMode) {
+    // Watch mode: use subscriptions and keep running
+    setupWatchmanDaemon(config);
 
-        // Check for stop signal every second
-        const stopSignalCheck = setInterval(() => {
-            if (hasSignal('stop')) {
-                consumeSignal('stop');
-                logger.info('Stop signal received. Shutting down...');
-                clearInterval(stopSignalCheck);
-                watchmanClient.end();
-                process.exit(0);
-            }
-        }, 1000);
-
-        // Handle graceful shutdown
-        process.on('SIGINT', () => {
-            clearInterval(stopSignalCheck);
-            logger.info('Shutting down...');
-            watchmanClient.end();
-            process.exit(0);
-        });
-    } else {
-        // One-shot mode: query for changes, process, and exit
-        await runOneShotSync(config);
+    // Check for stop signal every second
+    const stopSignalCheck = setInterval(() => {
+      if (hasSignal('stop')) {
+        consumeSignal('stop');
+        logger.info('Stop signal received. Shutting down...');
+        clearInterval(stopSignalCheck);
         watchmanClient.end();
-    }
+        process.exit(0);
+      }
+    }, 1000);
+
+    // Handle graceful shutdown
+    process.on('SIGINT', () => {
+      clearInterval(stopSignalCheck);
+      logger.info('Shutting down...');
+      watchmanClient.end();
+      process.exit(0);
+    });
+  } else {
+    // One-shot mode: query for changes, process, and exit
+    await runOneShotSync(config);
+    watchmanClient.end();
+  }
 }

@@ -29,74 +29,74 @@ export type { DeleteProtonDriveClient, DeleteOperationResult } from './types.js'
  * @returns DeleteOperationResult with success status
  */
 export async function deleteNode(
-    client: DeleteProtonDriveClient,
-    remotePath: string,
-    permanent: boolean = false
+  client: DeleteProtonDriveClient,
+  remotePath: string,
+  permanent: boolean = false
 ): Promise<DeleteOperationResult> {
-    const { parentParts, name } = parsePath(remotePath);
+  const { parentParts, name } = parsePath(remotePath);
 
-    // Get root folder
-    const rootFolder = await client.getMyFilesRootFolder();
+  // Get root folder
+  const rootFolder = await client.getMyFilesRootFolder();
 
-    if (!rootFolder.ok) {
-        return {
-            success: false,
-            existed: false,
-            error: `Failed to get root folder: ${rootFolder.error}`,
-        };
+  if (!rootFolder.ok) {
+    return {
+      success: false,
+      existed: false,
+      error: `Failed to get root folder: ${rootFolder.error}`,
+    };
+  }
+
+  const rootFolderUid = rootFolder.value!.uid;
+
+  // Traverse to parent folder
+  let targetFolderUid = rootFolderUid;
+
+  if (parentParts.length > 0) {
+    const traverseResult = await traverseRemotePath(client, rootFolderUid, parentParts);
+
+    if (!traverseResult) {
+      return { success: true, existed: false };
     }
 
-    const rootFolderUid = rootFolder.value!.uid;
+    targetFolderUid = traverseResult;
+  }
 
-    // Traverse to parent folder
-    let targetFolderUid = rootFolderUid;
+  // Find the target node
+  const targetNode = await findNodeByName(client, targetFolderUid, name);
 
-    if (parentParts.length > 0) {
-        const traverseResult = await traverseRemotePath(client, rootFolderUid, parentParts);
+  if (!targetNode) {
+    return { success: true, existed: false };
+  }
 
-        if (!traverseResult) {
-            return { success: true, existed: false };
+  // Delete or trash the node
+  try {
+    if (permanent) {
+      for await (const result of client.deleteNodes([targetNode.uid])) {
+        if (!result.ok) {
+          throw new Error(`Failed to delete: ${result.error}`);
         }
-
-        targetFolderUid = traverseResult;
-    }
-
-    // Find the target node
-    const targetNode = await findNodeByName(client, targetFolderUid, name);
-
-    if (!targetNode) {
-        return { success: true, existed: false };
-    }
-
-    // Delete or trash the node
-    try {
-        if (permanent) {
-            for await (const result of client.deleteNodes([targetNode.uid])) {
-                if (!result.ok) {
-                    throw new Error(`Failed to delete: ${result.error}`);
-                }
-            }
-        } else {
-            for await (const result of client.trashNodes([targetNode.uid])) {
-                if (!result.ok) {
-                    throw new Error(`Failed to trash: ${result.error}`);
-                }
-            }
+      }
+    } else {
+      for await (const result of client.trashNodes([targetNode.uid])) {
+        if (!result.ok) {
+          throw new Error(`Failed to trash: ${result.error}`);
         }
-
-        return {
-            success: true,
-            existed: true,
-            nodeUid: targetNode.uid,
-            nodeType: targetNode.type,
-        };
-    } catch (error) {
-        return {
-            success: false,
-            existed: true,
-            nodeUid: targetNode.uid,
-            nodeType: targetNode.type,
-            error: (error as Error).message,
-        };
+      }
     }
+
+    return {
+      success: true,
+      existed: true,
+      nodeUid: targetNode.uid,
+      nodeType: targetNode.type,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      existed: true,
+      nodeUid: targetNode.uid,
+      nodeType: targetNode.type,
+      error: (error as Error).message,
+    };
+  }
 }

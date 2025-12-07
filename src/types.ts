@@ -9,32 +9,32 @@
 // ============================================================================
 
 export interface NodeData {
-    name: string;
-    uid: string;
-    type: string;
+  name: string;
+  uid: string;
+  type: string;
 }
 
 export interface NodeResult {
-    ok: boolean;
-    value?: NodeData;
-    error?: unknown;
+  ok: boolean;
+  value?: NodeData;
+  error?: unknown;
 }
 
 export interface RootFolderResult {
-    ok: boolean;
-    value?: { uid: string };
-    error?: unknown;
+  ok: boolean;
+  value?: { uid: string };
+  error?: unknown;
 }
 
 export interface CreateFolderResult {
-    ok: boolean;
-    value?: { uid: string };
-    error?: unknown;
+  ok: boolean;
+  value?: { uid: string };
+  error?: unknown;
 }
 
 export interface DeleteResult {
-    ok: boolean;
-    error?: unknown;
+  ok: boolean;
+  error?: unknown;
 }
 
 // ============================================================================
@@ -42,32 +42,32 @@ export interface DeleteResult {
 // ============================================================================
 
 export interface UploadController {
-    pause(): void;
-    resume(): void;
-    completion(): Promise<{ nodeUid: string; nodeRevisionUid: string }>;
+  pause(): void;
+  resume(): void;
+  completion(): Promise<{ nodeUid: string; nodeRevisionUid: string }>;
 }
 
 export interface FileUploader {
-    getAvailableName(): Promise<string>;
-    uploadFromStream(
-        stream: ReadableStream,
-        thumbnails: [],
-        onProgress?: (uploadedBytes: number) => void
-    ): Promise<UploadController>;
+  getAvailableName(): Promise<string>;
+  uploadFromStream(
+    stream: ReadableStream,
+    thumbnails: [],
+    onProgress?: (uploadedBytes: number) => void
+  ): Promise<UploadController>;
 }
 
 export interface FileRevisionUploader {
-    uploadFromStream(
-        stream: ReadableStream,
-        thumbnails: [],
-        onProgress?: (uploadedBytes: number) => void
-    ): Promise<UploadController>;
+  uploadFromStream(
+    stream: ReadableStream,
+    thumbnails: [],
+    onProgress?: (uploadedBytes: number) => void
+  ): Promise<UploadController>;
 }
 
 export interface UploadMetadata {
-    mediaType: string;
-    expectedSize: number;
-    modificationTime?: Date;
+  mediaType: string;
+  expectedSize: number;
+  modificationTime?: Date;
 }
 
 // ============================================================================
@@ -78,38 +78,38 @@ export interface UploadMetadata {
  * Base Proton Drive client interface with common operations
  */
 export interface BaseProtonDriveClient {
-    iterateFolderChildren(folderUid: string): AsyncIterable<NodeResult>;
-    getMyFilesRootFolder(): Promise<RootFolderResult>;
+  iterateFolderChildren(folderUid: string): AsyncIterable<NodeResult>;
+  getMyFilesRootFolder(): Promise<RootFolderResult>;
 }
 
 /**
  * Proton Drive client interface for create operations
  */
 export interface CreateProtonDriveClient extends BaseProtonDriveClient {
-    createFolder(
-        parentNodeUid: string,
-        name: string,
-        modificationTime?: Date
-    ): Promise<CreateFolderResult>;
-    getFileUploader(
-        parentFolderUid: string,
-        name: string,
-        metadata: UploadMetadata,
-        signal?: AbortSignal
-    ): Promise<FileUploader>;
-    getFileRevisionUploader(
-        nodeUid: string,
-        metadata: UploadMetadata,
-        signal?: AbortSignal
-    ): Promise<FileRevisionUploader>;
+  createFolder(
+    parentNodeUid: string,
+    name: string,
+    modificationTime?: Date
+  ): Promise<CreateFolderResult>;
+  getFileUploader(
+    parentFolderUid: string,
+    name: string,
+    metadata: UploadMetadata,
+    signal?: AbortSignal
+  ): Promise<FileUploader>;
+  getFileRevisionUploader(
+    nodeUid: string,
+    metadata: UploadMetadata,
+    signal?: AbortSignal
+  ): Promise<FileRevisionUploader>;
 }
 
 /**
  * Proton Drive client interface for delete operations
  */
 export interface DeleteProtonDriveClient extends BaseProtonDriveClient {
-    trashNodes(nodeUids: string[]): AsyncIterable<DeleteResult>;
-    deleteNodes(nodeUids: string[]): AsyncIterable<DeleteResult>;
+  trashNodes(nodeUids: string[]): AsyncIterable<DeleteResult>;
+  deleteNodes(nodeUids: string[]): AsyncIterable<DeleteResult>;
 }
 
 /**
@@ -122,18 +122,18 @@ export interface ProtonDriveClient extends CreateProtonDriveClient, DeleteProton
 // ============================================================================
 
 export interface CreateResult {
-    success: boolean;
-    nodeUid?: string;
-    error?: string;
-    isDirectory: boolean;
+  success: boolean;
+  nodeUid?: string;
+  error?: string;
+  isDirectory: boolean;
 }
 
 export interface DeleteOperationResult {
-    success: boolean;
-    existed: boolean;
-    nodeUid?: string;
-    nodeType?: string;
-    error?: string;
+  success: boolean;
+  existed: boolean;
+  nodeUid?: string;
+  nodeType?: string;
+  error?: string;
 }
 
 // ============================================================================
@@ -141,8 +141,8 @@ export interface DeleteOperationResult {
 // ============================================================================
 
 export interface ParsedPath {
-    parentParts: string[];
-    name: string;
+  parentParts: string[];
+  name: string;
 }
 
 // ============================================================================
@@ -150,6 +150,6 @@ export interface ParsedPath {
 // ============================================================================
 
 export interface ApiError extends Error {
-    requires2FA?: boolean;
-    code?: number;
+  requires2FA?: boolean;
+  code?: number;
 }

@@ -8,25 +8,25 @@ import { join } from 'path';
 import { homedir } from 'os';
 import * as readline from 'readline';
 import {
-    sendSignal,
-    hasSignal,
-    consumeSignal,
-    killSyncProcesses,
-    isAlreadyRunning,
+  sendSignal,
+  hasSignal,
+  consumeSignal,
+  killSyncProcesses,
+  isAlreadyRunning,
 } from '../signals.js';
 
 function askYesNo(question: string): Promise<boolean> {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
-    return new Promise((resolve) => {
-        rl.question(`${question} (y/n): `, (answer) => {
-            rl.close();
-            resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-        });
+  return new Promise((resolve) => {
+    rl.question(`${question} (y/n): `, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
     });
+  });
 }
 
 const PLIST_DIR = join(homedir(), 'Library', 'LaunchAgents');
@@ -38,29 +38,27 @@ const SERVICE_NAME = 'com.damianb-bitflipper.proton-drive-sync';
 const PLIST_PATH = join(PLIST_DIR, `${SERVICE_NAME}.plist`);
 
 function getWatchmanPath(): string {
-    try {
-        return execSync('which watchman', { encoding: 'utf-8' }).trim();
-    } catch {
-        console.error('Error: watchman not found in PATH.');
-        console.error('Install from: https://facebook.github.io/watchman/docs/install');
-        process.exit(1);
-    }
+  try {
+    return execSync('which watchman', { encoding: 'utf-8' }).trim();
+  } catch {
+    console.error('Error: watchman not found in PATH.');
+    console.error('Install from: https://facebook.github.io/watchman/docs/install');
+    process.exit(1);
+  }
 }
 
 function getBinPath(): string {
-    try {
-        return execSync('which proton-drive-sync', { encoding: 'utf-8' }).trim();
-    } catch {
-        console.error('Error: proton-drive-sync not found in PATH.');
-        console.error(
-            'Make sure the CLI is installed globally with: npm install -g proton-drive-sync'
-        );
-        process.exit(1);
-    }
+  try {
+    return execSync('which proton-drive-sync', { encoding: 'utf-8' }).trim();
+  } catch {
+    console.error('Error: proton-drive-sync not found in PATH.');
+    console.error('Make sure the CLI is installed globally with: npm install -g proton-drive-sync');
+    process.exit(1);
+  }
 }
 
 function generateWatchmanPlist(watchmanPath: string): string {
-    return `<?xml version="1.0" encoding="UTF-8"?>
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -85,8 +83,8 @@ function generateWatchmanPlist(watchmanPath: string): string {
 }
 
 function generateSyncPlist(binPath: string): string {
-    const home = homedir();
-    return `<?xml version="1.0" encoding="UTF-8"?>
+  const home = homedir();
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -123,106 +121,106 @@ function generateSyncPlist(binPath: string): string {
 }
 
 function loadService(name: string, plistPath: string): void {
+  try {
+    execSync(`launchctl bootstrap gui/$(id -u) "${plistPath}"`, { stdio: 'ignore' });
+  } catch {
+    // Already loaded, try kickstart instead
     try {
-        execSync(`launchctl bootstrap gui/$(id -u) "${plistPath}"`, { stdio: 'ignore' });
+      execSync(`launchctl kickstart -k gui/$(id -u)/${name}`, { stdio: 'ignore' });
     } catch {
-        // Already loaded, try kickstart instead
-        try {
-            execSync(`launchctl kickstart -k gui/$(id -u)/${name}`, { stdio: 'ignore' });
-        } catch {
-            // Ignore
-        }
+      // Ignore
     }
+  }
 }
 
 function unloadService(name: string, plistPath: string): void {
+  try {
+    execSync(`launchctl bootout gui/$(id -u)/${name}`, { stdio: 'ignore' });
+  } catch {
+    // Try legacy unload
     try {
-        execSync(`launchctl bootout gui/$(id -u)/${name}`, { stdio: 'ignore' });
+      execSync(`launchctl unload "${plistPath}"`, { stdio: 'ignore' });
     } catch {
-        // Try legacy unload
-        try {
-            execSync(`launchctl unload "${plistPath}"`, { stdio: 'ignore' });
-        } catch {
-            // Ignore if not loaded
-        }
+      // Ignore if not loaded
     }
+  }
 }
 
 export async function serviceInstallCommand(): Promise<void> {
-    if (process.platform !== 'darwin') {
-        console.error('Error: Service installation is only supported on macOS.');
-        process.exit(1);
+  if (process.platform !== 'darwin') {
+    console.error('Error: Service installation is only supported on macOS.');
+    process.exit(1);
+  }
+
+  const watchmanPath = getWatchmanPath();
+  const binPath = getBinPath();
+
+  // Create LaunchAgents directory if it doesn't exist
+  if (!existsSync(PLIST_DIR)) {
+    mkdirSync(PLIST_DIR, { recursive: true });
+  }
+
+  let installedAny = false;
+
+  // Ask about watchman service
+  const installWatchman = await askYesNo('Install watchman service?');
+  if (installWatchman) {
+    console.log('Installing watchman service...');
+    if (existsSync(WATCHMAN_PLIST_PATH)) {
+      unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
     }
+    writeFileSync(WATCHMAN_PLIST_PATH, generateWatchmanPlist(watchmanPath));
+    console.log(`Created: ${WATCHMAN_PLIST_PATH}`);
+    loadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
+    console.log('Watchman service installed and started.');
+    installedAny = true;
+  } else {
+    console.log('Skipping watchman service.');
+  }
 
-    const watchmanPath = getWatchmanPath();
-    const binPath = getBinPath();
-
-    // Create LaunchAgents directory if it doesn't exist
-    if (!existsSync(PLIST_DIR)) {
-        mkdirSync(PLIST_DIR, { recursive: true });
+  // Ask about proton-drive-sync service
+  const installSync = await askYesNo('Install proton-drive-sync service?');
+  if (installSync) {
+    console.log('Installing proton-drive-sync service...');
+    if (existsSync(PLIST_PATH)) {
+      unloadService(SERVICE_NAME, PLIST_PATH);
     }
+    writeFileSync(PLIST_PATH, generateSyncPlist(binPath));
+    console.log(`Created: ${PLIST_PATH}`);
+    loadService(SERVICE_NAME, PLIST_PATH);
+    console.log('proton-drive-sync service installed and started.');
+    console.log('View logs with: proton-drive-sync logs');
+    installedAny = true;
+  } else {
+    console.log('Skipping proton-drive-sync service.');
+  }
 
-    let installedAny = false;
-
-    // Ask about watchman service
-    const installWatchman = await askYesNo('Install watchman service?');
-    if (installWatchman) {
-        console.log('Installing watchman service...');
-        if (existsSync(WATCHMAN_PLIST_PATH)) {
-            unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-        }
-        writeFileSync(WATCHMAN_PLIST_PATH, generateWatchmanPlist(watchmanPath));
-        console.log(`Created: ${WATCHMAN_PLIST_PATH}`);
-        loadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-        console.log('Watchman service installed and started.');
-        installedAny = true;
-    } else {
-        console.log('Skipping watchman service.');
-    }
-
-    // Ask about proton-drive-sync service
-    const installSync = await askYesNo('Install proton-drive-sync service?');
-    if (installSync) {
-        console.log('Installing proton-drive-sync service...');
-        if (existsSync(PLIST_PATH)) {
-            unloadService(SERVICE_NAME, PLIST_PATH);
-        }
-        writeFileSync(PLIST_PATH, generateSyncPlist(binPath));
-        console.log(`Created: ${PLIST_PATH}`);
-        loadService(SERVICE_NAME, PLIST_PATH);
-        console.log('proton-drive-sync service installed and started.');
-        console.log('View logs with: proton-drive-sync logs');
-        installedAny = true;
-    } else {
-        console.log('Skipping proton-drive-sync service.');
-    }
-
-    if (!installedAny) {
-        console.log('\nNo services were installed.');
-    }
+  if (!installedAny) {
+    console.log('\nNo services were installed.');
+  }
 }
 
 export function serviceUninstallCommand(): void {
-    if (process.platform !== 'darwin') {
-        console.error('Error: Service uninstallation is only supported on macOS.');
-        process.exit(1);
-    }
+  if (process.platform !== 'darwin') {
+    console.error('Error: Service uninstallation is only supported on macOS.');
+    process.exit(1);
+  }
 
-    if (!existsSync(PLIST_PATH)) {
-        console.log('Service is not installed.');
-        process.exit(0);
-    }
+  if (!existsSync(PLIST_PATH)) {
+    console.log('Service is not installed.');
+    process.exit(0);
+  }
 
-    // Unload the service
-    try {
-        execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' });
-    } catch {
-        // Ignore if not loaded
-    }
+  // Unload the service
+  try {
+    execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' });
+  } catch {
+    // Ignore if not loaded
+  }
 
-    // Remove plist file
-    unlinkSync(PLIST_PATH);
-    console.log('Service uninstalled.');
+  // Remove plist file
+  unlinkSync(PLIST_PATH);
+  console.log('Service uninstalled.');
 }
 
 /**
@@ -231,103 +229,103 @@ export function serviceUninstallCommand(): void {
  * which means launchd won't restart it (due to KeepAlive.SuccessfulExit: false).
  */
 export function stopCommand(): void {
-    // Check if a sync process is running first
-    if (!isAlreadyRunning()) {
-        console.log('No running proton-drive-sync process found.');
-        return;
+  // Check if a sync process is running first
+  if (!isAlreadyRunning()) {
+    console.log('No running proton-drive-sync process found.');
+    return;
+  }
+
+  // Send stop signal to the process
+  sendSignal('stop');
+  console.log('Stop signal sent. Waiting for process to exit...');
+
+  // Wait for up to 5 seconds for the process to exit
+  const startTime = Date.now();
+  const timeout = 15000;
+  const checkInterval = 100;
+
+  const waitForExit = (): void => {
+    // Check if signal was consumed (process handled it and exited)
+    if (!hasSignal('stop')) {
+      console.log('proton-drive-sync stopped.');
+      return;
     }
 
-    // Send stop signal to the process
-    sendSignal('stop');
-    console.log('Stop signal sent. Waiting for process to exit...');
+    if (Date.now() - startTime < timeout) {
+      setTimeout(waitForExit, checkInterval);
+    } else {
+      // Timeout - consume signal and report
+      consumeSignal('stop');
+      console.log('No running proton-drive-sync process found (or it did not respond).');
+    }
+  };
 
-    // Wait for up to 5 seconds for the process to exit
-    const startTime = Date.now();
-    const timeout = 15000;
-    const checkInterval = 100;
-
-    const waitForExit = (): void => {
-        // Check if signal was consumed (process handled it and exited)
-        if (!hasSignal('stop')) {
-            console.log('proton-drive-sync stopped.');
-            return;
-        }
-
-        if (Date.now() - startTime < timeout) {
-            setTimeout(waitForExit, checkInterval);
-        } else {
-            // Timeout - consume signal and report
-            consumeSignal('stop');
-            console.log('No running proton-drive-sync process found (or it did not respond).');
-        }
-    };
-
-    waitForExit();
+  waitForExit();
 }
 
 export function serviceUnloadCommand(): void {
-    if (process.platform !== 'darwin') {
-        console.error('Error: Service stop is only supported on macOS.');
-        process.exit(1);
+  if (process.platform !== 'darwin') {
+    console.error('Error: Service stop is only supported on macOS.');
+    process.exit(1);
+  }
+
+  // Unload the service to stop it and prevent restart
+  if (existsSync(PLIST_PATH)) {
+    try {
+      execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' });
+    } catch {
+      // Ignore if not loaded
     }
+  }
 
-    // Unload the service to stop it and prevent restart
-    if (existsSync(PLIST_PATH)) {
-        try {
-            execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' });
-        } catch {
-            // Ignore if not loaded
-        }
-    }
+  // Kill any straggler processes
+  killSyncProcesses();
 
-    // Kill any straggler processes
-    killSyncProcesses();
-
-    console.log('Service stopped and unloaded. Run `proton-drive-sync service start` to restart.');
+  console.log('Service stopped and unloaded. Run `proton-drive-sync service start` to restart.');
 }
 
 export function serviceLoadCommand(): void {
-    if (process.platform !== 'darwin') {
-        console.error('Error: Service start is only supported on macOS.');
-        process.exit(1);
-    }
+  if (process.platform !== 'darwin') {
+    console.error('Error: Service start is only supported on macOS.');
+    process.exit(1);
+  }
 
-    if (!existsSync(PLIST_PATH)) {
-        console.error('Service is not installed. Run `proton-drive-sync service install` first.');
-        process.exit(1);
-    }
+  if (!existsSync(PLIST_PATH)) {
+    console.error('Service is not installed. Run `proton-drive-sync service install` first.');
+    process.exit(1);
+  }
 
-    try {
-        execSync(`launchctl load "${PLIST_PATH}"`, { stdio: 'ignore' });
-        console.log('Service started.');
-    } catch {
-        console.error('Failed to start service.');
-        process.exit(1);
-    }
+  try {
+    execSync(`launchctl load "${PLIST_PATH}"`, { stdio: 'ignore' });
+    console.log('Service started.');
+  } catch {
+    console.error('Failed to start service.');
+    process.exit(1);
+  }
 }
 
 export function serviceReloadCommand(): void {
-    if (process.platform !== 'darwin') {
-        console.error('Error: Service reload is only supported on macOS.');
-        process.exit(1);
-    }
+  if (process.platform !== 'darwin') {
+    console.error('Error: Service reload is only supported on macOS.');
+    process.exit(1);
+  }
 
-    if (!existsSync(PLIST_PATH)) {
-        console.error('Service is not installed. Run `proton-drive-sync service install` first.');
-        process.exit(1);
-    }
+  if (!existsSync(PLIST_PATH)) {
+    console.error('Service is not installed. Run `proton-drive-sync service install` first.');
+    process.exit(1);
+  }
 
-    try {
-        execSync(`launchctl stop ${SERVICE_NAME}`, { stdio: 'ignore' });
-    } catch {
-        // Ignore if not running
-    }
+  try {
+    execSync(`launchctl stop ${SERVICE_NAME}`, { stdio: 'ignore' });
+  } catch {
+    // Ignore if not running
+  }
 
-    try {
-        execSync(`launchctl start ${SERVICE_NAME}`, { stdio: 'ignore' });
-        console.log('Service reloaded.');
-    } catch {
-        console.error('Failed to reload service.');
-        process.exit(1);
-    }
+  try {
+    execSync(`launchctl start ${SERVICE_NAME}`, { stdio: 'ignore' });
+    console.log('Service reloaded.');
+  } catch {
+    console.error('Failed to reload service.');
+    process.exit(1);
+  }
 }
