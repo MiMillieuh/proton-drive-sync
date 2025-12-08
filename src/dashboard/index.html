@@ -599,8 +599,26 @@
               this.stats = JSON.parse(e.data);
             });
             this.eventsSource.addEventListener('job', (e) => {
-              this.fetchAll();
+              const event = JSON.parse(e.data);
+              // Update stats from event if included (avoids extra API call)
+              if (event.stats) {
+                this.stats = event.stats;
+              }
+              // Debounce fetchAll to avoid thundering herd during rapid syncs
+              this.scheduleFetchAll();
             });
+          },
+
+          // Debounced fetch - waits 500ms of idle before fetching
+          fetchAllTimeout: null,
+          scheduleFetchAll() {
+            if (this.fetchAllTimeout) {
+              clearTimeout(this.fetchAllTimeout);
+            }
+            this.fetchAllTimeout = setTimeout(() => {
+              this.fetchAll();
+              this.fetchAllTimeout = null;
+            }, 500);
           },
 
           connectLogs() {

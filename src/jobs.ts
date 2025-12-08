@@ -5,7 +5,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { eq, and, lte, inArray, isNull } from 'drizzle-orm';
+import { eq, and, lte, inArray, isNull, sql } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
 import { SyncJobStatus, SyncEventType } from './db/schema.js';
 import { createNode } from './api/create.js';
@@ -29,6 +29,7 @@ export interface JobEvent {
   remotePath?: string;
   error?: string;
   timestamp: Date;
+  stats?: { pending: number; processing: number; synced: number; blocked: number };
 }
 
 // ============================================================================
@@ -141,13 +142,14 @@ export function enqueueJob(
     })
     .run();
 
-  // Emit event for dashboard
+  // Emit event for dashboard (include stats to avoid extra API call)
   jobEvents.emit('job', {
     type: 'enqueue',
     jobId: Number(result.lastInsertRowid),
     localPath: params.localPath,
     remotePath: params.remotePath,
     timestamp: new Date(),
+    stats: getJobCounts(),
   } satisfies JobEvent);
 }
 
@@ -283,12 +285,13 @@ export function markJobSynced(jobId: number, localPath: string, dryRun: boolean)
     tx.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
   });
 
-  // Emit event for dashboard
+  // Emit event for dashboard (include stats to avoid extra API call)
   jobEvents.emit('job', {
     type: 'synced',
     jobId,
     localPath,
     timestamp: new Date(),
+    stats: getJobCounts(),
   } satisfies JobEvent);
 
   // Separate transaction: cleanup old SYNCED jobs (low watermark: 1024, high watermark: 1280)
@@ -343,13 +346,14 @@ export function markJobBlocked(
     tx.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
   });
 
-  // Emit event for dashboard
+  // Emit event for dashboard (include stats to avoid extra API call)
   jobEvents.emit('job', {
     type: 'blocked',
     jobId,
     localPath,
     error,
     timestamp: new Date(),
+    stats: getJobCounts(),
   } satisfies JobEvent);
 }
 
@@ -460,12 +464,13 @@ export function scheduleRetry(
     tx.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
   });
 
-  // Emit event for dashboard
+  // Emit event for dashboard (include stats to avoid extra API call)
   jobEvents.emit('job', {
     type: 'retry',
     jobId,
     localPath,
     timestamp: new Date(),
+    stats: getJobCounts(),
   } satisfies JobEvent);
 
   logger.info(`Job ${jobId} scheduled for retry in ${Math.round(delaySec)}s`);
@@ -634,6 +639,7 @@ export async function processAllPendingJobs(
 
 /**
  * Get counts of jobs by status.
+ * Uses a single SQL query with GROUP BY for efficiency.
  */
 export function getJobCounts(): {
   pending: number;
@@ -641,28 +647,25 @@ export function getJobCounts(): {
   synced: number;
   blocked: number;
 } {
-  const pending = db
-    .select()
+  // Single query with GROUP BY instead of 4 separate queries
+  const rows = db
+    .select({
+      status: schema.syncJobs.status,
+      count: sql<number>`count(*)`,
+    })
     .from(schema.syncJobs)
-    .where(eq(schema.syncJobs.status, SyncJobStatus.PENDING))
-    .all().length;
-  const processing = db
-    .select()
-    .from(schema.syncJobs)
-    .where(eq(schema.syncJobs.status, SyncJobStatus.PROCESSING))
-    .all().length;
-  const synced = db
-    .select()
-    .from(schema.syncJobs)
-    .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
-    .all().length;
-  const blocked = db
-    .select()
-    .from(schema.syncJobs)
-    .where(eq(schema.syncJobs.status, SyncJobStatus.BLOCKED))
-    .all().length;
+    .groupBy(schema.syncJobs.status)
+    .all();
 
-  return { pending, processing, synced, blocked };
+  const counts = { pending: 0, processing: 0, synced: 0, blocked: 0 };
+  for (const row of rows) {
+    if (row.status === SyncJobStatus.PENDING) counts.pending = row.count;
+    else if (row.status === SyncJobStatus.PROCESSING) counts.processing = row.count;
+    else if (row.status === SyncJobStatus.SYNCED) counts.synced = row.count;
+    else if (row.status === SyncJobStatus.BLOCKED) counts.blocked = row.count;
+  }
+
+  return counts;
 }
 
 /**
