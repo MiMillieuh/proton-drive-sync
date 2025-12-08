@@ -1,4 +1,4 @@
-.PHONY: install build dev pre-commit publish clean
+.PHONY: install build dev pre-commit publish clean db-inspect
 
 # Install dependencies
 install:
@@ -25,3 +25,7 @@ publish:
 # Clean build artifacts
 clean:
 	rm -rf dist
+
+# Open Drizzle Studio to inspect the database
+db-inspect:
+	npx drizzle-kit studio
