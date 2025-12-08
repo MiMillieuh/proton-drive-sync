@@ -4,6 +4,7 @@
  * Manages the sync job queue for buffered file operations.
  */
 
+import { EventEmitter } from 'events';
 import { eq, and, lte, inArray, isNull } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
 import { SyncJobStatus, SyncEventType } from './db/schema.js';
@@ -12,6 +13,23 @@ import { deleteNode } from './api/delete.js';
 import { logger, isDebugEnabled } from './logger.js';
 import { registerSignalHandler, unregisterSignalHandler } from './signals.js';
 import type { ProtonDriveClient } from './api/types.js';
+
+// ============================================================================
+// Event Emitter for Dashboard
+// ============================================================================
+
+export const jobEvents = new EventEmitter();
+
+export type JobEventType = 'enqueue' | 'synced' | 'blocked' | 'retry';
+
+export interface JobEvent {
+  type: JobEventType;
+  jobId: number;
+  localPath: string;
+  remotePath?: string;
+  error?: string;
+  timestamp: Date;
+}
 
 // ============================================================================
 // Constants
@@ -89,7 +107,8 @@ export function enqueueJob(
   }
 
   // INSERT ... ON CONFLICT DO UPDATE is a single atomic SQL statement - no transaction needed
-  db.insert(schema.syncJobs)
+  const result = db
+    .insert(schema.syncJobs)
     .values({
       eventType: params.eventType,
       localPath: params.localPath,
@@ -111,6 +130,15 @@ export function enqueueJob(
       },
     })
     .run();
+
+  // Emit event for dashboard
+  jobEvents.emit('job', {
+    type: 'enqueue',
+    jobId: Number(result.lastInsertRowid),
+    localPath: params.localPath,
+    remotePath: params.remotePath,
+    timestamp: new Date(),
+  } satisfies JobEvent);
 }
 
 /**
@@ -206,6 +234,14 @@ export function markJobSynced(jobId: number, localPath: string, dryRun: boolean)
     tx.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
   });
 
+  // Emit event for dashboard
+  jobEvents.emit('job', {
+    type: 'synced',
+    jobId,
+    localPath,
+    timestamp: new Date(),
+  } satisfies JobEvent);
+
   // Separate transaction: cleanup old SYNCED jobs (low watermark: 1024, high watermark: 1280)
   const syncedCount = db
     .select()
@@ -257,6 +293,15 @@ export function markJobBlocked(
       .run();
     tx.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
   });
+
+  // Emit event for dashboard
+  jobEvents.emit('job', {
+    type: 'blocked',
+    jobId,
+    localPath,
+    error,
+    timestamp: new Date(),
+  } satisfies JobEvent);
 }
 
 /**
@@ -365,6 +410,14 @@ export function scheduleRetry(
       .run();
     tx.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
   });
+
+  // Emit event for dashboard
+  jobEvents.emit('job', {
+    type: 'retry',
+    jobId,
+    localPath,
+    timestamp: new Date(),
+  } satisfies JobEvent);
 
   logger.info(`Job ${jobId} scheduled for retry in ${Math.round(delaySec)}s`);
 }
@@ -553,4 +606,74 @@ export function getJobCounts(): {
     .all().length;
 
   return { pending, processing, synced, blocked };
+}
+
+/**
+ * Get recently synced jobs.
+ */
+export function getRecentJobs(limit: number = 50): Array<{
+  id: number;
+  localPath: string;
+  remotePath: string | null;
+  createdAt: Date;
+}> {
+  return db
+    .select({
+      id: schema.syncJobs.id,
+      localPath: schema.syncJobs.localPath,
+      remotePath: schema.syncJobs.remotePath,
+      createdAt: schema.syncJobs.createdAt,
+    })
+    .from(schema.syncJobs)
+    .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
+    .orderBy(schema.syncJobs.id)
+    .limit(limit)
+    .all()
+    .reverse(); // Most recent first
+}
+
+/**
+ * Get blocked jobs with error details.
+ */
+export function getBlockedJobs(): Array<{
+  id: number;
+  localPath: string;
+  remotePath: string | null;
+  lastError: string | null;
+  nRetries: number;
+  createdAt: Date;
+}> {
+  return db
+    .select({
+      id: schema.syncJobs.id,
+      localPath: schema.syncJobs.localPath,
+      remotePath: schema.syncJobs.remotePath,
+      lastError: schema.syncJobs.lastError,
+      nRetries: schema.syncJobs.nRetries,
+      createdAt: schema.syncJobs.createdAt,
+    })
+    .from(schema.syncJobs)
+    .where(eq(schema.syncJobs.status, SyncJobStatus.BLOCKED))
+    .all();
+}
+
+/**
+ * Get currently processing jobs.
+ */
+export function getProcessingJobs(): Array<{
+  id: number;
+  localPath: string;
+  remotePath: string | null;
+  createdAt: Date;
+}> {
+  return db
+    .select({
+      id: schema.syncJobs.id,
+      localPath: schema.syncJobs.localPath,
+      remotePath: schema.syncJobs.remotePath,
+      createdAt: schema.syncJobs.createdAt,
+    })
+    .from(schema.syncJobs)
+    .where(eq(schema.syncJobs.status, SyncJobStatus.PROCESSING))
+    .all();
 }

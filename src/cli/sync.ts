@@ -18,6 +18,7 @@ import {
 } from '../signals.js';
 import { enqueueJob, processAllPendingJobs } from '../jobs.js';
 import { SyncEventType } from '../db/schema.js';
+import { startDashboard, stopDashboard } from '../dashboard/server.js';
 import type { ProtonDriveClient } from '../api/types.js';
 
 // ============================================================================
@@ -437,11 +438,15 @@ export async function startCommand(options: {
     // Start job processor (polls every 10 seconds)
     const jobProcessor = startJobProcessor();
 
+    // Start dashboard server
+    startDashboard();
+
     // Register stop signal handler
     const handleStop = (): void => {
       logger.info('Stop signal received. Shutting down...');
       stopSignalListener();
       jobProcessor.stop();
+      stopDashboard();
       watchmanClient.end();
       process.exit(0);
     };
@@ -452,6 +457,7 @@ export async function startCommand(options: {
     process.on('SIGINT', () => {
       stopSignalListener();
       jobProcessor.stop();
+      stopDashboard();
       logger.info('Shutting down...');
       watchmanClient.end();
       process.exit(0);
