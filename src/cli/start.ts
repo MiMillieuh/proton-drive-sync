@@ -4,7 +4,7 @@
  * Handles CLI argument parsing and delegates to the sync engine.
  */
 
-import { loadConfig } from '../config.js';
+import { loadConfig, watchConfig } from '../config.js';
 import { logger, enableDebug, disableConsoleLogging, setDryRun } from '../logger.js';
 import { startSignalListener, stopSignalListener, registerSignalHandler } from '../signals.js';
 import { acquireRunLock, releaseRunLock } from '../flags.js';
@@ -145,6 +145,9 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
   // Start signal listener for IPC
   startSignalListener();
+
+  // Start watching for config reload signals
+  watchConfig();
 
   // Set up cleanup handler
   const cleanup = (): void => {

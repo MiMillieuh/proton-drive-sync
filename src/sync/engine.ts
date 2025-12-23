@@ -10,6 +10,7 @@ import { logger } from '../logger.js';
 import { registerSignalHandler } from '../signals.js';
 import { setFlag, clearFlag, isPaused, FLAGS } from '../flags.js';
 import { stopDashboard } from '../dashboard/server.js';
+import { getConfig, onConfigChange } from '../config.js';
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
 import {
@@ -20,7 +21,7 @@ import {
   type FileChange,
 } from './watcher.js';
 import { enqueueJob } from './queue.js';
-import { processAllPendingJobs } from './processor.js';
+import { processAllPendingJobs, setSyncConcurrency } from './processor.js';
 
 // ============================================================================
 // Constants
@@ -107,7 +108,7 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
   logger.info(`Found ${totalChanges} changes to sync`);
 
   // Process all jobs
-  const processed = await processAllPendingJobs(client, config, dryRun);
+  const processed = await processAllPendingJobs(client, dryRun);
   logger.info(`Processed ${processed} jobs`);
 
   closeWatchman();
@@ -125,11 +126,28 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
 
   await waitForWatchman();
 
+  // Initialize concurrency from config
+  setSyncConcurrency(config.sync_concurrency);
+
+  // Helper to create file change handler with current config
+  const createFileHandler = () => (file: FileChange) => handleFileChange(file, getConfig(), dryRun);
+
   // Set up file watching
-  await setupWatchSubscriptions(config, (file) => handleFileChange(file, config, dryRun), dryRun);
+  await setupWatchSubscriptions(config, createFileHandler(), dryRun);
+
+  // Wire up config change handlers
+  onConfigChange('sync_concurrency', () => {
+    setSyncConcurrency(getConfig().sync_concurrency);
+  });
+
+  onConfigChange('sync_dirs', async () => {
+    logger.info('sync_dirs changed, reinitializing watch subscriptions...');
+    const newConfig = getConfig();
+    await setupWatchSubscriptions(newConfig, createFileHandler(), dryRun);
+  });
 
   // Start the job processor loop
-  const processorHandle = startJobProcessorLoop(client, config, dryRun);
+  const processorHandle = startJobProcessorLoop(client, dryRun);
 
   // Wait for stop signal
   await new Promise<void>((resolve) => {
@@ -165,11 +183,7 @@ interface ProcessorHandle {
 /**
  * Start the job processor loop that polls for pending jobs.
  */
-function startJobProcessorLoop(
-  client: ProtonDriveClient,
-  config: Config,
-  dryRun: boolean
-): ProcessorHandle {
+function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): ProcessorHandle {
   let running = true;
   let paused = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -211,7 +225,7 @@ function startJobProcessorLoop(
     logger.debug('Job processor polling...');
 
     try {
-      const processed = await processAllPendingJobs(client, config, dryRun);
+      const processed = await processAllPendingJobs(client, dryRun);
       if (processed > 0) {
         logger.info(`Processed ${processed} sync job(s)`);
       }

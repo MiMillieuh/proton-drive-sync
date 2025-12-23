@@ -8,9 +8,9 @@ import { SyncEventType } from '../db/schema.js';
 import { createNode } from '../proton/create.js';
 import { deleteNode } from '../proton/delete.js';
 import { logger } from '../logger.js';
+import { DEFAULT_SYNC_CONCURRENCY } from '../config.js';
 import { registerSignalHandler, unregisterSignalHandler } from '../signals.js';
 import type { ProtonDriveClient } from '../proton/types.js';
-import type { Config } from '../config.js';
 import {
   getNextPendingJob,
   markJobSynced,
@@ -20,6 +20,19 @@ import {
   scheduleRetry,
   ErrorCategory,
 } from './queue.js';
+
+// ============================================================================
+// Dynamic Concurrency
+// ============================================================================
+
+/** Current sync concurrency - can be updated via config change */
+let syncConcurrency = DEFAULT_SYNC_CONCURRENCY;
+
+/** Update the sync concurrency value */
+export function setSyncConcurrency(value: number): void {
+  syncConcurrency = value;
+  logger.info(`Sync concurrency updated to ${value}`);
+}
 
 // ============================================================================
 // Helper Functions
@@ -142,7 +155,6 @@ export async function processNextJob(client: ProtonDriveClient, dryRun: boolean)
  */
 export async function processAllPendingJobs(
   client: ProtonDriveClient,
-  config: Config,
   dryRun: boolean
 ): Promise<number> {
   let count = 0;
@@ -158,7 +170,7 @@ export async function processAllPendingJobs(
   registerSignalHandler('pause-sync', handlePause);
 
   try {
-    // Process jobs with up to sync_concurrency in parallel using a worker pool pattern
+    // Process jobs with up to syncConcurrency in parallel using a worker pool pattern
     const activeJobs = new Set<Promise<boolean>>();
 
     const startNextJob = (): void => {
@@ -174,8 +186,8 @@ export async function processAllPendingJobs(
       activeJobs.add(jobPromise);
     };
 
-    // Start initial batch of concurrent jobs
-    for (let i = 0; i < config.sync_concurrency; i++) {
+    // Start initial batch of concurrent jobs (uses current syncConcurrency)
+    for (let i = 0; i < syncConcurrency; i++) {
       startNextJob();
     }
 

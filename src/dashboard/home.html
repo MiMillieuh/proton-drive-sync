@@ -72,13 +72,31 @@
     <!-- Header -->
     <header class="bg-gray-800 border-b border-gray-700 shadow-sm sticky top-0 z-50">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <img
-            src="/assets/icon.svg"
-            alt="Proton Drive Sync"
-            class="w-8 h-8 rounded-lg shadow-lg shadow-proton/20"
-          />
-          <h1 class="text-xl font-bold tracking-tight text-white">Proton Drive Sync</h1>
+        <div class="flex items-center gap-6">
+          <a href="/" class="flex items-center gap-3">
+            <img
+              src="/assets/icon.svg"
+              alt="Proton Drive Sync"
+              class="w-8 h-8 rounded-lg shadow-lg shadow-proton/20"
+            />
+            <h1 class="text-xl font-bold tracking-tight text-white">Proton Drive Sync</h1>
+          </a>
+
+          <!-- Tab Navigation -->
+          <nav class="flex items-center gap-1 ml-4">
+            <a
+              href="/"
+              class="px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-gray-700 text-white"
+            >
+              Home
+            </a>
+            <a
+              href="/config"
+              class="px-4 py-2 text-sm font-medium rounded-lg transition-colors text-gray-400 hover:text-white hover:bg-gray-700/50"
+            >
+              Config
+            </a>
+          </nav>
         </div>
 
         <div class="flex items-center gap-4">

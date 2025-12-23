@@ -2,11 +2,14 @@
  * Proton Drive Sync - Configuration
  *
  * Reads config from ~/.config/proton-drive-sync/config.json
+ * Supports hot-reloading via namespaced signals (config:reload:<key>)
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { xdgConfig } from 'xdg-basedir';
+import { logger } from './logger.js';
+import { registerSignalHandler, sendSignal } from './signals.js';
 
 // ============================================================================
 // Types
@@ -22,9 +25,21 @@ export interface Config {
   sync_concurrency: number;
 }
 
+/** Config keys that can be watched for changes */
+export type ConfigKey = keyof Config;
+
 // ============================================================================
 // Constants
 // ============================================================================
+
+/** Base signal prefix for config reload */
+export const CONFIG_RELOAD_SIGNAL = 'config:reload';
+
+/** Signal to trigger config reload check */
+export const CONFIG_CHECK_SIGNAL = 'config:check';
+
+/** Default sync concurrency */
+export const DEFAULT_SYNC_CONCURRENCY = 8;
 
 if (!xdgConfig) {
   console.error('Could not determine XDG config directory');
@@ -43,16 +58,26 @@ export function ensureConfigDir(): void {
 }
 
 // ============================================================================
-// Config Loading
+// Config Singleton
 // ============================================================================
 
-export function loadConfig(): Config {
+let currentConfig: Config | null = null;
+
+/**
+ * Parse and validate config from file. Returns null if invalid.
+ */
+function parseConfig(exitOnError: boolean): Config | null {
   if (!existsSync(CONFIG_FILE)) {
-    console.error(`Config file not found: ${CONFIG_FILE}`);
-    console.error(
-      'Create it with: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "backup"}]}'
-    );
-    process.exit(1);
+    const msg = `Config file not found: ${CONFIG_FILE}`;
+    if (exitOnError) {
+      console.error(msg);
+      console.error(
+        'Create it with: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "backup"}]}'
+      );
+      process.exit(1);
+    }
+    logger.error(msg);
+    return null;
   }
 
   try {
@@ -60,38 +85,70 @@ export function loadConfig(): Config {
     const config = JSON.parse(content) as Config;
 
     if (!config.sync_dirs || !Array.isArray(config.sync_dirs)) {
-      console.error('Config must have a "sync_dirs" array');
-      process.exit(1);
+      const msg = 'Config must have a "sync_dirs" array';
+      if (exitOnError) {
+        console.error(msg);
+        process.exit(1);
+      }
+      logger.error(msg);
+      return null;
     }
 
     if (config.sync_dirs.length === 0) {
-      console.error('Config "sync_dirs" array is empty');
-      process.exit(1);
+      const msg = 'Config "sync_dirs" array is empty';
+      if (exitOnError) {
+        console.error(msg);
+        process.exit(1);
+      }
+      logger.error(msg);
+      return null;
     }
 
-    // Default sync_concurrency to 8 if not set
+    // Default sync_concurrency if not set
     if (config.sync_concurrency === undefined) {
-      config.sync_concurrency = 8;
+      config.sync_concurrency = DEFAULT_SYNC_CONCURRENCY;
     }
 
     // Validate all sync_dirs entries
     for (const dir of config.sync_dirs) {
       if (typeof dir === 'string') {
-        console.error(
-          'Config sync_dirs must be objects with "source_path" and "remote_root" properties'
-        );
-        console.error(
-          'Example: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "backup"}]}'
-        );
-        process.exit(1);
+        const msg =
+          'Config sync_dirs must be objects with "source_path" and "remote_root" properties';
+        if (exitOnError) {
+          console.error(msg);
+          console.error(
+            'Example: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "backup"}]}'
+          );
+          process.exit(1);
+        }
+        logger.error(msg);
+        return null;
       }
       if (!dir.source_path) {
-        console.error('Each sync_dirs entry must have a "source_path" property');
-        process.exit(1);
+        const msg = 'Each sync_dirs entry must have a "source_path" property';
+        if (exitOnError) {
+          console.error(msg);
+          process.exit(1);
+        }
+        logger.error(msg);
+        return null;
       }
+
+      // Ensure remote_root starts with '/'
+      if (!dir.remote_root) {
+        dir.remote_root = '/';
+      } else if (!dir.remote_root.startsWith('/')) {
+        dir.remote_root = '/' + dir.remote_root;
+      }
+
       if (!existsSync(dir.source_path)) {
-        console.error(`Sync directory does not exist: ${dir.source_path}`);
-        process.exit(1);
+        const msg = `Sync directory does not exist: ${dir.source_path}`;
+        if (exitOnError) {
+          console.error(msg);
+          process.exit(1);
+        }
+        logger.error(msg);
+        return null;
       }
       // Default remote_root to empty string if not set
       if (dir.remote_root === undefined) {
@@ -101,13 +158,87 @@ export function loadConfig(): Config {
 
     return config;
   } catch (error) {
+    let msg: string;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      console.error(`Config file not found: ${CONFIG_FILE}`);
+      msg = `Config file not found: ${CONFIG_FILE}`;
     } else if (error instanceof SyntaxError) {
-      console.error(`Invalid JSON in config file: ${CONFIG_FILE}`);
+      msg = `Invalid JSON in config file: ${CONFIG_FILE}`;
     } else {
-      console.error(`Error reading config: ${(error as Error).message}`);
+      msg = `Error reading config: ${(error as Error).message}`;
     }
-    process.exit(1);
+    if (exitOnError) {
+      console.error(msg);
+      process.exit(1);
+    }
+    logger.error(msg);
+    return null;
   }
+}
+
+/**
+ * Load config from file. Exits process if config is invalid on first load.
+ */
+export function loadConfig(): Config {
+  if (currentConfig) {
+    return currentConfig;
+  }
+  currentConfig = parseConfig(true)!;
+  return currentConfig;
+}
+
+/**
+ * Get the current config. Must call loadConfig() first.
+ */
+export function getConfig(): Config {
+  if (!currentConfig) {
+    throw new Error('Config not loaded. Call loadConfig() first.');
+  }
+  return currentConfig;
+}
+
+/** Check if two values are deeply equal (for sync_dirs array comparison) */
+function isEqual<T>(a: T, b: T): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Reload config from file and send signals for changed keys.
+ */
+function reloadConfig(): void {
+  const oldConfig = currentConfig;
+  const newConfig = parseConfig(false);
+  if (!newConfig) {
+    logger.warn('Config reload failed, keeping previous config');
+    return;
+  }
+
+  currentConfig = newConfig;
+  logger.info('Config reloaded');
+
+  if (!oldConfig) return;
+
+  // Send signals for keys that changed
+  const keys: ConfigKey[] = ['sync_dirs', 'sync_concurrency'];
+  for (const key of keys) {
+    if (!isEqual(oldConfig[key], newConfig[key])) {
+      logger.debug(`Config key "${key}" changed, sending signal`);
+      sendSignal(`${CONFIG_RELOAD_SIGNAL}:${key}`);
+    }
+  }
+}
+
+/**
+ * Register a handler for changes to a specific config key.
+ * Handler is called when config:reload:<key> signal is received.
+ */
+export function onConfigChange(key: ConfigKey, handler: () => void): void {
+  registerSignalHandler(`${CONFIG_RELOAD_SIGNAL}:${key}`, handler);
+}
+
+/**
+ * Start watching for config check signals.
+ * When received, reloads config and sends signals for changed keys.
+ */
+export function watchConfig(): void {
+  registerSignalHandler(CONFIG_CHECK_SIGNAL, reloadConfig);
 }

@@ -39,6 +39,9 @@ export type FileChangeHandler = (file: FileChange) => void;
 
 const SUB_NAME = 'proton-drive-sync';
 
+/** Track active subscription names for teardown */
+let activeSubscriptions: { root: string; subName: string }[] = [];
+
 // ============================================================================
 // Watchman Client
 // ============================================================================
@@ -108,6 +111,17 @@ function subscribeWatchman(
   return new Promise((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (watchmanClient as any).command(['subscribe', root, subName, sub], (err: Error | null) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+/** Promisified wrapper for Watchman unsubscribe command */
+function unsubscribeWatchman(root: string, subName: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (watchmanClient as any).command(['unsubscribe', root, subName], (err: Error | null) => {
       if (err) reject(err);
       else resolve();
     });
@@ -197,6 +211,9 @@ export async function setupWatchSubscriptions(
   onFileChange: FileChangeHandler,
   dryRun: boolean
 ): Promise<void> {
+  // Clear any existing subscriptions first
+  await teardownWatchSubscriptions();
+
   // Set up watches for all configured directories
   await Promise.all(
     config.sync_dirs.map(async (dir) => {
@@ -221,6 +238,7 @@ export async function setupWatchSubscriptions(
 
       // Register subscription
       await subscribeWatchman(root, subName, sub);
+      activeSubscriptions.push({ root, subName });
       logger.info(`Watching ${dir.source_path} for changes...`);
     })
   );
@@ -263,4 +281,31 @@ export async function setupWatchSubscriptions(
   watchmanClient.on('end', () => {});
 
   logger.info('Watching for file changes... (press Ctrl+C to exit)');
+}
+
+/**
+ * Tear down all active Watchman subscriptions.
+ * Call this before re-setting up subscriptions on config change.
+ */
+export async function teardownWatchSubscriptions(): Promise<void> {
+  if (activeSubscriptions.length === 0) return;
+
+  logger.info('Tearing down watch subscriptions...');
+
+  // Remove subscription event listeners
+  watchmanClient.removeAllListeners('subscription');
+
+  // Unsubscribe from all active subscriptions
+  await Promise.all(
+    activeSubscriptions.map(async ({ root, subName }) => {
+      try {
+        await unsubscribeWatchman(root, subName);
+        logger.debug(`Unsubscribed from ${subName}`);
+      } catch (err) {
+        logger.warn(`Failed to unsubscribe from ${subName}: ${(err as Error).message}`);
+      }
+    })
+  );
+
+  activeSubscriptions = [];
 }

@@ -10,7 +10,7 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { streamSSE } from 'hono/streaming';
-import { createReadStream, statSync, watchFile, unwatchFile } from 'fs';
+import { createReadStream, statSync, watchFile, unwatchFile, writeFileSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { createInterface } from 'readline';
 import { join, dirname, basename } from 'path';
@@ -27,6 +27,8 @@ import {
   retryAllNow,
 } from '../sync/queue.js';
 import { FLAGS, setFlag, clearFlag } from '../flags.js';
+import { sendSignal } from '../signals.js';
+import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
 import type { DashboardDiff, AuthStatusUpdate, DashboardJob, DashboardStatus } from './server.js';
 import type { Config } from '../config.js';
 
@@ -517,7 +519,13 @@ let isDryRun = false;
 
 // Serve dashboard HTML at root
 app.get('/', async (c) => {
-  const html = await readFile(join(__dirname, 'index.html'), 'utf-8');
+  const html = await readFile(join(__dirname, 'home.html'), 'utf-8');
+  return c.html(html);
+});
+
+// Serve config page
+app.get('/config', async (c) => {
+  const html = await readFile(join(__dirname, 'config.html'), 'utf-8');
   return c.html(html);
 });
 
@@ -663,7 +671,39 @@ app.get('/api/jobs/processing', (c) => {
 });
 
 app.get('/api/config', (c) => {
-  return c.json({ dryRun: isDryRun });
+  return c.json({ dryRun: isDryRun, config: currentConfig });
+});
+
+/** Save config and trigger reload */
+app.post('/api/config', async (c) => {
+  try {
+    const body = await c.req.json();
+    const newConfig: Config = {
+      sync_dirs: body.sync_dirs || [],
+      sync_concurrency: body.sync_concurrency || 1,
+    };
+
+    // Validate
+    if (!Array.isArray(newConfig.sync_dirs)) {
+      return c.json({ error: 'sync_dirs must be an array' }, 400);
+    }
+    if (typeof newConfig.sync_concurrency !== 'number' || newConfig.sync_concurrency < 1) {
+      return c.json({ error: 'sync_concurrency must be a positive number' }, 400);
+    }
+
+    // Write to config file
+    writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2), 'utf-8');
+
+    // Update local state
+    currentConfig = newConfig;
+
+    // Send signal to trigger config reload in sync process
+    sendSignal(CONFIG_CHECK_SIGNAL);
+
+    return c.json({ success: true, config: newConfig });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
 });
 
 app.get('/api/auth', (c) => {
