@@ -85,14 +85,6 @@
           <!-- Auth Status -->
           <div id="auth-status" hx-swap="morph:innerHTML" sse-swap="auth"></div>
 
-          <!-- Paused Badge (only shown when syncing is paused) -->
-          <div
-            id="paused-badge"
-            class="empty:hidden"
-            hx-swap="morph:innerHTML"
-            sse-swap="paused"
-          ></div>
-
           <!-- Connection Status -->
           <div
             id="connection-status"
@@ -145,13 +137,51 @@
 
         <!-- Main Content Grid -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <!-- Active Processing -->
+          <!-- Pending Transfers -->
           <div class="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[400px]">
             <div
               class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl"
             >
               <h2
                 class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2"
+              >
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                Pending
+              </h2>
+              <span
+                id="pending-count"
+                class="text-xs font-mono text-gray-500"
+                hx-get="/api/fragments/pending-count"
+                hx-trigger="load"
+                hx-swap="innerHTML"
+                sse-swap="pending-count"
+                >0 items</span
+              >
+            </div>
+            <div
+              id="pending-list"
+              class="flex-1 overflow-y-auto custom-scrollbar p-2"
+              hx-get="/api/fragments/pending"
+              hx-trigger="load"
+              hx-swap="morph:innerHTML"
+              sse-swap="pending"
+            >
+              <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+                <p class="text-sm">Loading...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Processing -->
+          <div class="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[400px]">
+            <div
+              class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl"
+            >
+              <h2
+                id="processing-title"
+                class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2"
+                sse-swap="processing-title"
+                hx-swap="innerHTML"
               >
                 <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
                 Active Transfers
@@ -202,93 +232,10 @@
               </div>
             </div>
           </div>
-
-          <!-- Blocked Jobs -->
-          <div class="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[400px]">
-            <div
-              class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl"
-            >
-              <h2
-                class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2"
-              >
-                <span class="w-2 h-2 rounded-full bg-red-500"></span>
-                Blocked Transfers
-              </h2>
-              <span
-                id="blocked-count"
-                class="text-xs font-mono text-gray-500"
-                hx-get="/api/fragments/blocked-count"
-                hx-trigger="load"
-                hx-swap="innerHTML"
-                sse-swap="blocked-count"
-                >0 items</span
-              >
-            </div>
-            <div
-              id="blocked-list"
-              class="flex-1 overflow-y-auto custom-scrollbar p-2"
-              hx-get="/api/fragments/blocked"
-              hx-trigger="load"
-              hx-swap="morph:innerHTML"
-              sse-swap="blocked"
-            >
-              <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-                <svg
-                  class="w-10 h-10 opacity-20 animate-spin"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-                <p class="text-sm">Loading...</p>
-              </div>
-            </div>
-          </div>
         </div>
 
         <!-- Queue Overview: 3 columns -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <!-- Pending Transfers -->
-          <div class="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[300px]">
-            <div
-              class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl"
-            >
-              <h2
-                class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2"
-              >
-                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-                Pending
-              </h2>
-              <span
-                id="pending-count"
-                class="text-xs font-mono text-gray-500"
-                hx-get="/api/fragments/pending-count"
-                hx-trigger="load"
-                hx-swap="innerHTML"
-                sse-swap="pending-count"
-                >0 items</span
-              >
-            </div>
-            <div
-              id="pending-list"
-              class="flex-1 overflow-y-auto custom-scrollbar p-2"
-              hx-get="/api/fragments/pending"
-              hx-trigger="load"
-              hx-swap="morph:innerHTML"
-              sse-swap="pending"
-            >
-              <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-                <p class="text-sm">Loading...</p>
-              </div>
-            </div>
-          </div>
-
           <!-- Recently Synced -->
           <div class="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[300px]">
             <div
@@ -365,6 +312,54 @@
               sse-swap="retry"
             >
               <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+                <p class="text-sm">Loading...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Blocked Jobs -->
+          <div class="bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-[300px]">
+            <div
+              class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl"
+            >
+              <h2
+                class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2"
+              >
+                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                Failed Transfers
+              </h2>
+              <span
+                id="blocked-count"
+                class="text-xs font-mono text-gray-500"
+                hx-get="/api/fragments/blocked-count"
+                hx-trigger="load"
+                hx-swap="innerHTML"
+                sse-swap="blocked-count"
+                >0 items</span
+              >
+            </div>
+            <div
+              id="blocked-list"
+              class="flex-1 overflow-y-auto custom-scrollbar p-2"
+              hx-get="/api/fragments/blocked"
+              hx-trigger="load"
+              hx-swap="morph:innerHTML"
+              sse-swap="blocked"
+            >
+              <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+                <svg
+                  class="w-10 h-10 opacity-20 animate-spin"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
+                </svg>
                 <p class="text-sm">Loading...</p>
               </div>
             </div>
@@ -479,33 +474,10 @@
       }
 
       // Handle SSE connection status
-      document.body.addEventListener('htmx:sseOpen', () => {
-        document.getElementById('connection-status').innerHTML = `
-          <div class="relative flex h-2.5 w-2.5">
-            <span id="heartbeat-ping" class="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-0"></span>
-            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
-          </div>
-          <span class="text-xs font-medium text-green-400">Connected</span>
-        `;
-        document.getElementById('connection-status').className =
-          'flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-green-500/30 bg-green-500/10';
-      });
+      let heartbeatTimeout = null;
+      const HEARTBEAT_TIMEOUT_MS = 10000;
 
-      // Pulse the heartbeat dot on each heartbeat event
-      // Listen for custom event triggered by the hidden heartbeat listener
-      document.body.addEventListener('heartbeat-received', () => {
-        const ping = document.getElementById('heartbeat-ping');
-        if (ping) {
-          ping.classList.remove('opacity-0');
-          ping.classList.add('animate-ping', 'opacity-75');
-          setTimeout(() => {
-            ping.classList.remove('animate-ping', 'opacity-75');
-            ping.classList.add('opacity-0');
-          }, 500);
-        }
-      });
-
-      document.body.addEventListener('htmx:sseError', () => {
+      function showDisconnected() {
         document.getElementById('connection-status').innerHTML = `
           <div class="relative flex h-2.5 w-2.5">
             <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
@@ -524,6 +496,44 @@
           el.classList.remove('animate-spin');
           el.classList.add('opacity-50');
         });
+      }
+
+      function resetHeartbeatTimeout() {
+        if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+        heartbeatTimeout = setTimeout(showDisconnected, HEARTBEAT_TIMEOUT_MS);
+      }
+
+      document.body.addEventListener('htmx:sseOpen', () => {
+        document.getElementById('connection-status').innerHTML = `
+          <div class="relative flex h-2.5 w-2.5">
+            <span id="heartbeat-ping" class="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-0"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+          </div>
+          <span class="text-xs font-medium text-green-400">Connected</span>
+        `;
+        document.getElementById('connection-status').className =
+          'flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-green-500/30 bg-green-500/10';
+        resetHeartbeatTimeout();
+      });
+
+      // Pulse the heartbeat dot on each heartbeat event
+      // Listen for custom event triggered by the hidden heartbeat listener
+      document.body.addEventListener('heartbeat-received', () => {
+        resetHeartbeatTimeout();
+        const ping = document.getElementById('heartbeat-ping');
+        if (ping) {
+          ping.classList.remove('opacity-0');
+          ping.classList.add('animate-ping', 'opacity-75');
+          setTimeout(() => {
+            ping.classList.remove('animate-ping', 'opacity-75');
+            ping.classList.add('opacity-0');
+          }, 500);
+        }
+      });
+
+      document.body.addEventListener('htmx:sseError', () => {
+        if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+        showDisconnected();
       });
 
       // Clear "Waiting for logs..." on first log
@@ -543,6 +553,32 @@
           newEl.style.display = parseInt(newEl.dataset.level) >= currentLogLevel ? '' : 'none';
         }
       });
+
+      // Retry countdown timer - updates all retry time displays every second
+      function formatRetryCountdown(retryAt) {
+        const diffMs = new Date(retryAt).getTime() - Date.now();
+        if (diffMs <= 0) return 'now';
+        const diffSec = Math.floor(diffMs / 1000);
+        if (diffSec < 60) return `${diffSec}s`;
+        const diffMin = Math.floor(diffSec / 60);
+        if (diffMin < 60) return `${diffMin}m`;
+        const diffHour = Math.floor(diffMin / 60);
+        if (diffHour < 24) return `${diffHour}h`;
+        const diffDay = Math.floor(diffHour / 24);
+        return `${diffDay}d`;
+      }
+
+      function updateRetryCountdowns() {
+        document.querySelectorAll('.retry-countdown[data-retry-at]').forEach((el) => {
+          const retryAt = el.dataset.retryAt;
+          if (retryAt) {
+            el.textContent = 'in ' + formatRetryCountdown(retryAt);
+          }
+        });
+      }
+
+      updateRetryCountdowns();
+      setInterval(updateRetryCountdowns, 1000);
     </script>
   </body>
 </html>

@@ -172,14 +172,21 @@ function renderProcessingList(jobs: DashboardJob[]): string {
 </div>`;
   }
 
+  // When paused, show clock icon; when active, show spinning refresh icon
+  const icon = currentIsPaused
+    ? `<svg class="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>`
+    : `<svg class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>`;
+
   return `<div class="space-y-1">${jobs
     .map(
       (job) => `
 <div class="px-3 py-2.5 rounded-lg bg-gray-900/50 border border-gray-700/50 hover:border-blue-500/30 transition-colors group">
   <div class="flex items-start gap-3">
-    <svg class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 ${currentIsPaused ? '' : 'animate-spin'}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
+    ${icon}
     <div class="min-w-0 flex-1">
       <div class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</div>
       <div class="text-[10px] text-gray-500 mt-0.5 truncate">${escapeHtml(job.localPath)}</div>
@@ -272,45 +279,36 @@ function renderPendingList(jobs: DashboardJob[]): string {
     .join('')}</div>`;
 }
 
-/** Format relative time for retry */
-function formatRetryTime(date: Date | string | undefined): string {
-  if (!date) return '';
-  const d = typeof date === 'string' ? new Date(date) : date;
-  const now = new Date();
-  const diffMs = d.getTime() - now.getTime();
-  if (diffMs <= 0) return 'now';
-  const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return `${diffSec}s`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m`;
-  const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}h`;
-  const diffDay = Math.floor(diffHour / 24);
-  return `${diffDay}d`;
-}
-
 /** Render retry jobs list HTML */
 function renderRetryList(jobs: DashboardJob[]): string {
   if (jobs.length === 0) {
     return `
 <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+  <svg class="w-10 h-10 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
   <p class="text-sm">No scheduled retries</p>
 </div>`;
   }
 
   return `<div class="space-y-1">${jobs
-    .map(
-      (job) => `
+    .map((job) => {
+      const retryAtIso = job.retryAt
+        ? typeof job.retryAt === 'string'
+          ? job.retryAt
+          : job.retryAt.toISOString()
+        : '';
+      return `
 <div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
   <svg class="w-4 h-4 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
   </svg>
   <div class="min-w-0 flex-1 flex items-center justify-between gap-4">
     <span class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</span>
-    <span class="text-[10px] text-orange-400 font-mono whitespace-nowrap">in ${formatRetryTime(job.retryAt)}</span>
+    <span class="text-[10px] text-orange-400 font-mono whitespace-nowrap retry-countdown" data-retry-at="${retryAtIso}"></span>
   </div>
-</div>`
-    )
+</div>`;
+    })
     .join('')}</div>`;
 }
 
@@ -423,6 +421,18 @@ function renderDryRunBanner(dryRun: boolean): string {
     <span>DRY-RUN MODE - No changes are being synced. Information shown may be incorrect.</span>
   </div>
 </div>`;
+}
+
+/** Render processing box title based on pause state */
+function renderProcessingTitle(isPaused: boolean): string {
+  if (isPaused) {
+    return `
+<span class="w-2 h-2 rounded-full bg-amber-500"></span>
+Paused Transfers`;
+  }
+  return `
+<span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+Active Transfers`;
 }
 
 /** Render a single log line as HTML */
@@ -684,10 +694,11 @@ app.get('/api/events', async (c) => {
     };
 
     const statusHandler = (status: DashboardStatus) => {
-      // Forward full status: auth, paused badge, pause button, and heartbeat to keep connection alive
+      // Forward full status: auth, paused badge, pause button, processing title, and heartbeat
       stream.writeSSE({ event: 'auth', data: renderAuthStatus(status.auth) });
       stream.writeSSE({ event: 'paused', data: renderPausedBadge(status.isPaused) });
       stream.writeSSE({ event: 'pause-button', data: renderPauseButton(status.isPaused) });
+      stream.writeSSE({ event: 'processing-title', data: renderProcessingTitle(status.isPaused) });
       // Re-render pending list to update spin animation based on pause state
       stream.writeSSE({ event: 'pending', data: renderPendingList(getPendingJobs(50)) });
       stream.writeSSE({ event: 'heartbeat', data: '' });
@@ -713,6 +724,10 @@ app.get('/api/events', async (c) => {
     await stream.writeSSE({ event: 'auth', data: renderAuthStatus(currentAuthStatus) });
     await stream.writeSSE({ event: 'paused', data: renderPausedBadge(currentIsPaused) });
     await stream.writeSSE({ event: 'pause-button', data: renderPauseButton(currentIsPaused) });
+    await stream.writeSSE({
+      event: 'processing-title',
+      data: renderProcessingTitle(currentIsPaused),
+    });
     await stream.writeSSE({ event: 'processing', data: renderProcessingList(processingJobs) });
     await stream.writeSSE({ event: 'processing-count', data: `${processingJobs.length} items` });
     await stream.writeSSE({ event: 'blocked', data: renderBlockedList(blockedJobs) });
