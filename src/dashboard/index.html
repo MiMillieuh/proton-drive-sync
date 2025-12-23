@@ -74,6 +74,15 @@
         </div>
 
         <div class="flex items-center gap-4">
+          <!-- Pause/Resume Button -->
+          <div
+            id="pause-button"
+            hx-get="/api/fragments/pause-button"
+            hx-trigger="load"
+            hx-swap="innerHTML"
+            sse-swap="pause-button"
+          ></div>
+
           <!-- Auth Status -->
           <div id="auth-status" hx-swap="morph:innerHTML" sse-swap="auth"></div>
 

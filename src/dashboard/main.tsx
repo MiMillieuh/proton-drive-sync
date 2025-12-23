@@ -25,6 +25,7 @@ import {
   getPendingJobs,
   getRetryJobs,
 } from '../sync/queue.js';
+import { FLAGS, setFlag, clearFlag } from '../flags.js';
 import type { DashboardDiff, AuthStatusUpdate, DashboardJob, DashboardStatus } from './server.js';
 import type { Config } from '../config.js';
 
@@ -358,6 +359,38 @@ function renderPausedBadge(isPaused: boolean): string {
 </div>`;
 }
 
+/** Render pause/resume button */
+function renderPauseButton(isPaused: boolean): string {
+  if (isPaused) {
+    // Show resume button
+    return `
+<button
+  hx-post="/api/toggle-pause"
+  hx-swap="outerHTML"
+  class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-green-500/30 hover:border-green-500/50 hover:bg-green-500/10 transition-colors cursor-pointer"
+>
+  <svg class="h-3 w-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+  <span class="text-xs font-medium text-green-400">Resume Sync</span>
+</button>`;
+  } else {
+    // Show pause button
+    return `
+<button
+  hx-post="/api/toggle-pause"
+  hx-swap="outerHTML"
+  class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-600 hover:border-amber-500/50 hover:bg-amber-500/10 transition-colors cursor-pointer"
+>
+  <svg class="h-3 w-3 text-gray-400 hover:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+  <span class="text-xs font-medium text-gray-400">Pause Sync</span>
+</button>`;
+  }
+}
+
 /** Render dry-run banner HTML */
 function renderDryRunBanner(dryRun: boolean): string {
   if (!dryRun) return '';
@@ -536,6 +569,24 @@ app.get('/api/fragments/config-info', (c) => {
   return c.html(renderConfigInfo(currentConfig));
 });
 
+app.get('/api/fragments/pause-button', (c) => {
+  return c.html(renderPauseButton(currentIsPaused));
+});
+
+/** Toggle pause state */
+app.post('/api/toggle-pause', (c) => {
+  if (currentIsPaused) {
+    clearFlag(FLAGS.PAUSED);
+    currentIsPaused = false;
+  } else {
+    setFlag(FLAGS.PAUSED);
+    currentIsPaused = true;
+  }
+  // Emit status event so all SSE clients get updated
+  statusEvents.emit('status', { auth: currentAuthStatus, isPaused: currentIsPaused });
+  return c.html(renderPauseButton(currentIsPaused));
+});
+
 // ============================================================================
 // JSON API Endpoints (kept for backwards compatibility)
 // ============================================================================
@@ -589,9 +640,10 @@ app.get('/api/events', async (c) => {
     };
 
     const statusHandler = (status: DashboardStatus) => {
-      // Forward full status: auth, paused badge, and heartbeat to keep connection alive
+      // Forward full status: auth, paused badge, pause button, and heartbeat to keep connection alive
       stream.writeSSE({ event: 'auth', data: renderAuthStatus(status.auth) });
       stream.writeSSE({ event: 'paused', data: renderPausedBadge(status.isPaused) });
+      stream.writeSSE({ event: 'pause-button', data: renderPauseButton(status.isPaused) });
       // Re-render pending list to update spin animation based on pause state
       stream.writeSSE({ event: 'pending', data: renderPendingList(getPendingJobs(50)) });
       stream.writeSSE({ event: 'heartbeat', data: '' });
