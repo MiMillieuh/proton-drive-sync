@@ -28,8 +28,11 @@ export function isAlreadyRunning(): boolean {
  * Acquire the run lock: checks if another instance is running, clears stale signals,
  * and marks this process as running. All in one transaction.
  * Returns true if lock acquired, false if another instance is already running.
+ * In dev mode (PROTON_DEV=1), forces lock acquisition for hot reload support.
  */
 export function acquireRunLock(): boolean {
+  const isDevMode = process.env.PROTON_DEV === '1';
+
   return db.transaction((tx) => {
     // Check if already running
     const existing = tx
@@ -38,7 +41,7 @@ export function acquireRunLock(): boolean {
       .where(eq(schema.signals.signal, RUNNING_SIGNAL))
       .get();
 
-    if (existing) {
+    if (existing && !isDevMode) {
       return false;
     }
 
