@@ -4,7 +4,7 @@
  * This file runs as a separate Node.js process, forked from the main sync process.
  * It communicates with the parent via IPC for job events (received as diffs).
  *
- * Sends JSON events via SSE and uses Alpine.js client-side to apply diffs incrementally.
+ * Uses htmx with SSE - sends HTML fragments for live updates.
  */
 
 import { Hono } from 'hono';
@@ -13,12 +13,12 @@ import { streamSSE } from 'hono/streaming';
 import { createReadStream, statSync, watchFile, unwatchFile } from 'fs';
 import { readFile } from 'fs/promises';
 import { createInterface } from 'readline';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { xdgState } from 'xdg-basedir';
 import { EventEmitter } from 'events';
 import { getJobCounts, getRecentJobs, getBlockedJobs, getProcessingJobs } from '../sync/queue.js';
-import type { DashboardDiff, AuthStatusUpdate } from './server.js';
+import type { DashboardDiff, AuthStatusUpdate, DashboardJob } from './server.js';
 
 // ============================================================================
 // Constants
@@ -67,6 +67,252 @@ process.on(
 );
 
 // ============================================================================
+// HTML Fragment Renderers
+// ============================================================================
+
+function formatPath(path: string): string {
+  return basename(path);
+}
+
+function formatTime(date: Date | string | undefined): string {
+  if (!date) return '';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleTimeString();
+}
+
+/** Render stats cards HTML */
+function renderStats(counts: {
+  pending: number;
+  processing: number;
+  synced: number;
+  blocked: number;
+}): string {
+  return `
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+  <!-- Pending -->
+  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-amber-500/50 transition-colors group relative overflow-hidden">
+    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+      <svg class="w-12 h-12 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    </div>
+    <dt class="text-sm font-medium text-gray-400">Pending</dt>
+    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-amber-400 transition-colors">${counts.pending}</dd>
+  </div>
+
+  <!-- Processing -->
+  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-blue-500/50 transition-colors group relative overflow-hidden">
+    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+      <svg class="w-12 h-12 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+    </div>
+    <dt class="text-sm font-medium text-gray-400">Processing</dt>
+    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-blue-400 transition-colors">${counts.processing}</dd>
+  </div>
+
+  <!-- Synced -->
+  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-green-500/50 transition-colors group relative overflow-hidden">
+    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+      <svg class="w-12 h-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+      </svg>
+    </div>
+    <dt class="text-sm font-medium text-gray-400">Synced</dt>
+    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-green-400 transition-colors">${counts.synced}</dd>
+  </div>
+
+  <!-- Blocked -->
+  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-red-500/50 transition-colors group relative overflow-hidden">
+    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+      <svg class="w-12 h-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    </div>
+    <dt class="text-sm font-medium text-gray-400">Blocked</dt>
+    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-red-400 transition-colors">${counts.blocked}</dd>
+  </div>
+</div>`;
+}
+
+/** Render processing jobs list HTML */
+function renderProcessingList(jobs: DashboardJob[]): string {
+  if (jobs.length === 0) {
+    return `
+<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+  <svg class="w-10 h-10 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+  </svg>
+  <p class="text-sm">Queue is empty</p>
+</div>`;
+  }
+
+  return `<div class="space-y-1">${jobs
+    .map(
+      (job) => `
+<div class="px-3 py-2.5 rounded-lg bg-gray-900/50 border border-gray-700/50 hover:border-blue-500/30 transition-colors group">
+  <div class="flex items-start gap-3">
+    <svg class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+    <div class="min-w-0 flex-1">
+      <div class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</div>
+      <div class="text-[10px] text-gray-500 mt-0.5 truncate">${escapeHtml(job.localPath)}</div>
+    </div>
+  </div>
+</div>`
+    )
+    .join('')}</div>`;
+}
+
+/** Render blocked jobs list HTML */
+function renderBlockedList(jobs: DashboardJob[]): string {
+  if (jobs.length === 0) {
+    return `
+<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+  <svg class="w-10 h-10 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+  <p class="text-sm">All systems nominal</p>
+</div>`;
+  }
+
+  return `<div class="space-y-1">${jobs
+    .map(
+      (job) => `
+<div class="px-3 py-2.5 rounded-lg bg-red-500/5 border border-red-500/20 hover:bg-red-500/10 transition-colors group">
+  <div class="flex items-start gap-3">
+    <svg class="w-4 h-4 text-red-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
+    <div class="min-w-0 flex-1">
+      <div class="text-xs font-mono text-red-200 truncate">${escapeHtml(formatPath(job.localPath))}</div>
+      <div class="text-[10px] text-red-400/70 mt-1 line-clamp-2">${escapeHtml(job.lastError || '')}</div>
+    </div>
+    <div class="shrink-0 text-[10px] font-mono text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
+      Retry: ${job.nRetries || 0}
+    </div>
+  </div>
+</div>`
+    )
+    .join('')}</div>`;
+}
+
+/** Render recent jobs list HTML */
+function renderRecentList(jobs: DashboardJob[]): string {
+  if (jobs.length === 0) {
+    return `
+<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+  <p class="text-sm">No recent activity</p>
+</div>`;
+  }
+
+  return `<div class="space-y-1">${jobs
+    .map(
+      (job) => `
+<div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
+  <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+  </svg>
+  <div class="min-w-0 flex-1 flex items-center justify-between gap-4">
+    <span class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</span>
+    <span class="text-[10px] text-gray-500 font-mono whitespace-nowrap">${formatTime(job.createdAt)}</span>
+  </div>
+</div>`
+    )
+    .join('')}</div>`;
+}
+
+/** Render auth status HTML */
+function renderAuthStatus(auth: AuthStatusUpdate): string {
+  const statusConfig = {
+    pending: {
+      border: 'border-gray-500/30 bg-gray-500/10',
+      icon: `<svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
+      text: 'text-gray-400',
+      label: 'Waiting for auth...',
+    },
+    authenticating: {
+      border: 'border-amber-500/30 bg-amber-500/10',
+      icon: `<svg class="animate-spin h-3 w-3 text-amber-400" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`,
+      text: 'text-amber-400',
+      label: 'Authenticating...',
+    },
+    authenticated: {
+      border: 'border-green-500/30 bg-green-500/10',
+      icon: `<svg class="h-3 w-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>`,
+      text: 'text-green-400',
+      label: `Authenticated as: ${escapeHtml(auth.username || 'User')}`,
+    },
+    failed: {
+      border: 'border-red-500/30 bg-red-500/10',
+      icon: `<svg class="h-3 w-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" /></svg>`,
+      text: 'text-red-400',
+      label: 'Auth Failed',
+    },
+  };
+
+  const config = statusConfig[auth.status];
+  return `
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 transition-colors duration-300 ${config.border}">
+  ${config.icon}
+  <span class="text-xs font-medium ${config.text}">${config.label}</span>
+</div>`;
+}
+
+/** Render dry-run banner HTML */
+function renderDryRunBanner(dryRun: boolean): string {
+  if (!dryRun) return '';
+  return `
+<div class="bg-amber-500/90 text-amber-950 px-4 py-2.5 text-center font-medium text-sm shadow-lg">
+  <div class="flex items-center justify-center gap-2">
+    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
+    <span>DRY-RUN MODE - No changes are being synced. Information shown may be incorrect.</span>
+  </div>
+</div>`;
+}
+
+/** Render a single log line as HTML */
+function renderLogLine(line: string): string {
+  let level = 20;
+  let levelClass = 'border-gray-700 text-gray-500';
+  let formattedLine = line;
+
+  if (line.includes('"level":50') || line.includes('"level":"error"')) {
+    level = 50;
+    levelClass = 'border-red-500/50 bg-red-500/5 text-red-200';
+  } else if (line.includes('"level":40') || line.includes('"level":"warn"')) {
+    level = 40;
+    levelClass = 'border-amber-500/50 bg-amber-500/5 text-amber-200';
+  } else if (line.includes('"level":30') || line.includes('"level":"info"')) {
+    level = 30;
+    levelClass = 'border-blue-500/50 text-blue-200';
+  }
+
+  try {
+    const json = JSON.parse(line);
+    const time = new Date(json.time || json.timestamp).toLocaleTimeString();
+    formattedLine = `[${time}] ${json.msg || json.message}`;
+  } catch {
+    // Use raw line if not valid JSON
+  }
+
+  return `<div data-level="${level}" class="break-all border-l-2 pl-3 py-0.5 ${levelClass}">${escapeHtml(formattedLine)}</div>`;
+}
+
+/** Escape HTML entities */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// ============================================================================
 // Hono App
 // ============================================================================
 
@@ -79,80 +325,121 @@ app.get('/', async (c) => {
   return c.html(html);
 });
 
-// ============================================================================
-// JSON API Endpoints
-// ============================================================================
-
-// GET /api/stats - Job queue counts
-app.get('/api/stats', (c) => {
-  const counts = getJobCounts();
-  return c.json(counts);
+// Serve static assets
+app.get('/assets/:filename', async (c) => {
+  const filename = c.req.param('filename');
+  const filePath = join(__dirname, 'assets', filename);
+  try {
+    const content = await readFile(filePath);
+    const ext = filename.split('.').pop();
+    const contentType =
+      ext === 'svg' ? 'image/svg+xml' : ext === 'png' ? 'image/png' : 'application/octet-stream';
+    return c.body(content, 200, { 'Content-Type': contentType });
+  } catch {
+    return c.notFound();
+  }
 });
 
-// GET /api/jobs/recent - Recently synced jobs
+// ============================================================================
+// HTML Fragment Endpoints
+// ============================================================================
+
+app.get('/api/fragments/stats', (c) => {
+  return c.html(renderStats(getJobCounts()));
+});
+
+app.get('/api/fragments/processing', (c) => {
+  return c.html(renderProcessingList(getProcessingJobs()));
+});
+
+app.get('/api/fragments/processing-count', (c) => {
+  return c.html(`${getProcessingJobs().length} items`);
+});
+
+app.get('/api/fragments/blocked', (c) => {
+  return c.html(renderBlockedList(getBlockedJobs()));
+});
+
+app.get('/api/fragments/blocked-count', (c) => {
+  return c.html(`${getBlockedJobs().length} items`);
+});
+
+app.get('/api/fragments/recent', (c) => {
+  const limit = parseInt(c.req.query('limit') || '50', 10);
+  return c.html(renderRecentList(getRecentJobs(limit)));
+});
+
+app.get('/api/fragments/recent-count', (c) => {
+  return c.html(`${getRecentJobs(50).length} items`);
+});
+
+app.get('/api/fragments/auth-status', (c) => {
+  return c.html(renderAuthStatus(currentAuthStatus));
+});
+
+app.get('/api/fragments/dry-run-banner', (c) => {
+  return c.html(renderDryRunBanner(isDryRun));
+});
+
+// ============================================================================
+// JSON API Endpoints (kept for backwards compatibility)
+// ============================================================================
+
+app.get('/api/stats', (c) => {
+  return c.json(getJobCounts());
+});
+
 app.get('/api/jobs/recent', (c) => {
   const limit = parseInt(c.req.query('limit') || '50', 10);
-  const jobs = getRecentJobs(limit);
-  return c.json(jobs);
+  return c.json(getRecentJobs(limit));
 });
 
-// GET /api/jobs/blocked - Blocked jobs
 app.get('/api/jobs/blocked', (c) => {
-  const jobs = getBlockedJobs();
-  return c.json(jobs);
+  return c.json(getBlockedJobs());
 });
 
-// GET /api/jobs/processing - Currently processing jobs
 app.get('/api/jobs/processing', (c) => {
-  const jobs = getProcessingJobs();
-  return c.json(jobs);
+  return c.json(getProcessingJobs());
 });
 
-// GET /api/config - Dashboard configuration
 app.get('/api/config', (c) => {
   return c.json({ dryRun: isDryRun });
 });
 
-// GET /api/auth - Current auth status
 app.get('/api/auth', (c) => {
   return c.json(currentAuthStatus);
 });
 
 // ============================================================================
-// SSE Endpoints
+// SSE Endpoints - Send HTML Fragments
 // ============================================================================
 
-// GET /api/events - SSE stream of job state changes (diffs) and auth status
+// GET /api/events - SSE stream of HTML fragment updates
 app.get('/api/events', async (c) => {
   return streamSSE(c, async (stream) => {
-    const stateDiffHandler = (diff: DashboardDiff) => {
-      stream.writeSSE({
-        event: 'job_state_diff',
-        data: JSON.stringify(diff),
-      });
+    const stateDiffHandler = (_diff: DashboardDiff) => {
+      // On any state change, send updated HTML fragments
+      const counts = getJobCounts();
+      stream.writeSSE({ event: 'stats', data: renderStats(counts) });
+      stream.writeSSE({ event: 'processing', data: renderProcessingList(getProcessingJobs()) });
+      stream.writeSSE({ event: 'processing-count', data: `${getProcessingJobs().length} items` });
+      stream.writeSSE({ event: 'blocked', data: renderBlockedList(getBlockedJobs()) });
+      stream.writeSSE({ event: 'blocked-count', data: `${getBlockedJobs().length} items` });
+      stream.writeSSE({ event: 'recent', data: renderRecentList(getRecentJobs(50)) });
+      stream.writeSSE({ event: 'recent-count', data: `${getRecentJobs(50).length} items` });
     };
 
     const authHandler = (auth: AuthStatusUpdate) => {
-      stream.writeSSE({
-        event: 'auth',
-        data: JSON.stringify(auth),
-      });
+      stream.writeSSE({ event: 'auth', data: renderAuthStatus(auth) });
     };
 
     stateDiffEvents.on('job_state_diff', stateDiffHandler);
     authEvents.on('auth', authHandler);
 
-    // Send initial stats
-    await stream.writeSSE({
-      event: 'stats',
-      data: JSON.stringify(getJobCounts()),
-    });
-
-    // Send current auth status
-    await stream.writeSSE({
-      event: 'auth',
-      data: JSON.stringify(currentAuthStatus),
-    });
+    // Send initial state
+    const counts = getJobCounts();
+    await stream.writeSSE({ event: 'stats', data: renderStats(counts) });
+    await stream.writeSSE({ event: 'auth', data: renderAuthStatus(currentAuthStatus) });
 
     // Keep connection alive with heartbeat
     const heartbeat = setInterval(() => {
@@ -171,7 +458,7 @@ app.get('/api/events', async (c) => {
   });
 });
 
-// GET /api/logs - SSE stream of log lines since dashboard startup
+// GET /api/logs - SSE stream of log lines as HTML
 app.get('/api/logs', async (c) => {
   return streamSSE(c, async (stream) => {
     // Start from where the log file was when dashboard subprocess started
@@ -198,7 +485,7 @@ app.get('/api/logs', async (c) => {
           if (line.trim()) {
             await stream.writeSSE({
               event: 'log',
-              data: line,
+              data: renderLogLine(line),
             });
           }
         }
