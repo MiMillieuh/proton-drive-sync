@@ -6,13 +6,12 @@ A CLI tool that watches local directories and syncs changes to Proton Drive in r
 
 ### Requirements
 
-- Node.js >= 18
 - [Watchman](https://facebook.github.io/watchman/docs/install)
 
 ### Installation
 
 ```bash
-npm install -g proton-drive-sync
+curl -fsSL https://raw.githubusercontent.com/damianb-bitflipper/proton-drive-sync/main/install | bash
 ```
 
 ### Authentication
@@ -89,7 +88,7 @@ proton-drive-sync service uninstall
 git clone https://github.com/damianb-bitflipper/proton-drive-sync
 cd proton-drive-sync
 make install
-pnpm link --global
+bun link --global
 ```
 
 ### Make Commands
@@ -124,11 +123,11 @@ To publish a new version to npm:
 
 ```bash
 # Login to npm (if not already logged in)
-pnpm login
+bun login
 
 # Build the package
-pnpm build
+bun run build
 
 # Publish to npm
-pnpm publish
+bun publish
 ```

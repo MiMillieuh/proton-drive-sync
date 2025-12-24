@@ -7,10 +7,17 @@
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { xdgState } from 'xdg-basedir';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { Database } from 'bun:sqlite';
+import { drizzle } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema.js';
+
+// Import migrations as text (embedded at compile time)
+import migration0000 from './migrations/0000_hot_whizzer.sql' with { type: 'text' };
+import migration0001 from './migrations/0001_unique_invisible_woman.sql' with { type: 'text' };
+import migration0002 from './migrations/0002_flowery_apocalypse.sql' with { type: 'text' };
+import migration0003 from './migrations/0003_real_sharon_carter.sql' with { type: 'text' };
+import migration0004 from './migrations/0004_wise_mockingbird.sql' with { type: 'text' };
+import migration0005 from './migrations/0005_opposite_venom.sql' with { type: 'text' };
 
 // ============================================================================
 // Constants
@@ -24,11 +31,77 @@ if (!xdgState) {
 export const STATE_DIR = join(xdgState, 'proton-drive-sync');
 const DB_PATH = join(STATE_DIR, 'state.db');
 
+// Migrations in order
+const migrations = [
+  { id: '0000_hot_whizzer', sql: migration0000 },
+  { id: '0001_unique_invisible_woman', sql: migration0001 },
+  { id: '0002_flowery_apocalypse', sql: migration0002 },
+  { id: '0003_real_sharon_carter', sql: migration0003 },
+  { id: '0004_wise_mockingbird', sql: migration0004 },
+  { id: '0005_opposite_venom', sql: migration0005 },
+];
+
+// ============================================================================
+// Migration Runner
+// ============================================================================
+
+/**
+ * Runs embedded migrations against the database.
+ * Tracks applied migrations using content hashes (compatible with Drizzle's migrator).
+ */
+async function runMigrations(sqlite: Database) {
+  // Create migrations tracking table if it doesn't exist (matches Drizzle's schema)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )
+  `);
+
+  // Get already applied migration hashes
+  const applied = new Set(
+    sqlite
+      .query<{ hash: string }, []>('SELECT hash FROM __drizzle_migrations')
+      .all()
+      .map((row: { hash: string }) => row.hash)
+  );
+
+  // Apply pending migrations
+  for (const migration of migrations) {
+    // Use SHA256 hash to match Drizzle's approach
+    const hashBuffer = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(migration.sql)
+    );
+    const hash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    if (applied.has(hash)) continue;
+
+    // Execute each statement in the migration
+    const statements = migration.sql
+      .split('--> statement-breakpoint')
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0);
+
+    for (const statement of statements) {
+      sqlite.exec(statement);
+    }
+
+    // Record the migration with its hash
+    sqlite
+      .query('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)')
+      .run(hash, Date.now());
+  }
+}
+
 // ============================================================================
 // Database Initialization
 // ============================================================================
 
-function initializeDatabase() {
+async function initializeDatabase() {
   // Ensure state directory exists
   if (!existsSync(STATE_DIR)) {
     mkdirSync(STATE_DIR, { recursive: true });
@@ -36,14 +109,13 @@ function initializeDatabase() {
 
   const sqlite = new Database(DB_PATH);
 
-  const db = drizzle(sqlite, { schema });
+  // Run embedded migrations
+  await runMigrations(sqlite);
 
-  // Run migrations from the compiled migrations folder
-  const migrationsPath = new URL('./migrations', import.meta.url).pathname;
-  migrate(db, { migrationsFolder: migrationsPath });
+  const db = drizzle(sqlite, { schema });
 
   return db;
 }
 
-export const db = initializeDatabase();
+export const db = await initializeDatabase();
 export { schema };

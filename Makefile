@@ -2,25 +2,25 @@
 
 # Install dependencies
 install:
-	pnpm install
+	bun install
 
-# Build the project
+# Build standalone binary with bun
 build:
-	pnpm build
+	bun build --compile --minify ./src/index.ts --outfile ./dist/proton-drive-sync
 
 # Run directly with tsx in watch mode (auto-reload on file changes)
 dev:
-	PROTON_DEV=1 pnpm tsx watch src/index.ts $(ARGS)
+	PROTON_DEV=1 bun --bun tsx watch src/index.ts $(ARGS)
 
 # Run pre-commit checks on all files
 pre-commit:
-	pnpm eslint --fix 'src/**/*.ts'
-	pnpm prettier --write 'src/**/*.ts' '*.json' '*.md'
+	bun eslint --fix 'src/**/*.ts'
+	bun prettier --write 'src/**/*.ts' '*.json' '*.md'
 
 # Publish to npm
 publish:
-	pnpm build
-	pnpm publish
+	bun run build
+	bun publish
 
 # Clean build artifacts
 clean:
@@ -28,4 +28,4 @@ clean:
 
 # Open Drizzle Studio to inspect the database
 db-inspect:
-	npx drizzle-kit studio
+	bun drizzle-kit studio
