@@ -28,6 +28,7 @@ import {
 } from '../sync/queue.js';
 import { FLAGS, setFlag, clearFlag, hasFlag } from '../flags.js';
 import { sendSignal } from '../signals.js';
+import { logger } from '../logger.js';
 import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
 import {
   isServiceInstalled,
@@ -447,13 +448,14 @@ function renderAuthStatus(auth: AuthStatusUpdate): string {
 
   // Set authenticated label only when status is authenticated (to safely access username)
   if (auth.status === 'authenticated') {
-    const label = auth.username ? `${auth.username}@proton.me` : auth.email || 'Logged in';
+    const label = auth.username ? `${auth.username}@proton.me` : 'Logged in';
     statusConfig.authenticated.label = label;
+    logger.info(`Authenticated. Authenticated as ${label}`);
   }
 
   const config = statusConfig[auth.status] || statusConfig.unauthenticated;
   return `
-<div class="flex items-center gap-2 px-3 py-1.5 rounded-full border ${config.border}">
+<div class="h-9 flex items-center gap-2 px-3 rounded-full border ${config.border}">
   ${config.icon}
   <span class="text-xs font-medium ${config.text}">${config.label}</span>
 </div>`;
@@ -1497,53 +1499,58 @@ app.get('/api/logs', async (c) => {
 // Start Server
 // ============================================================================
 
-const server = serve({
-  fetch: app.fetch,
-  port: DASHBOARD_PORT,
-});
+// Only start the server if this file is being run as a forked subprocess (with IPC channel)
+// This prevents the server from starting when bun --watch scans/loads the file directly
+const isForkedSubprocess = typeof process.send === 'function';
 
-// Handle server errors (e.g., EADDRINUSE)
-server.on('error', (err: NodeJS.ErrnoException) => {
-  safeSend({ type: 'error', error: err.message, code: err.code });
-  process.exit(1);
-});
+if (isForkedSubprocess) {
+  const server = serve({
+    fetch: app.fetch,
+    port: DASHBOARD_PORT,
+  });
 
-/**
- * Safely send IPC message to parent process.
- * If the parent has exited, the send will fail with EPIPE - we handle this gracefully.
- */
-function safeSend(message: Record<string, unknown>): void {
-  if (process.send) {
-    try {
-      process.send(message);
-    } catch {
-      // Parent process has exited, shut down gracefully
-      server.close();
-      process.exit(0);
+  /**
+   * Safely send IPC message to parent process.
+   * If the parent has exited, the send will fail with EPIPE - we handle this gracefully.
+   */
+  function safeSend(message: Record<string, unknown>): void {
+    if (process.send) {
+      try {
+        process.send(message);
+      } catch {
+        // Parent process has exited, shut down gracefully
+        server.close();
+        process.exit(0);
+      }
     }
   }
+
+  // Handle server errors (e.g., EADDRINUSE)
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    safeSend({ type: 'error', error: err.message, code: err.code });
+    process.exit(1);
+  });
+
+  // Wait for server to be listening before notifying parent
+  server.on('listening', () => {
+    safeSend({ type: 'ready', port: DASHBOARD_PORT });
+  });
+
+  // Graceful shutdown helper - exit immediately
+  // SSE connections keep the server alive, so we can't wait for server.close()
+  function shutdown() {
+    process.exit(0);
+  }
+
+  // Exit if parent process dies (IPC channel closes)
+  process.on('disconnect', shutdown);
+
+  // Handle EPIPE errors from IPC when parent exits unexpectedly
+  process.on('error', () => {
+    shutdown();
+  });
+
+  // Graceful shutdown
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
-
-// Wait for server to be listening before notifying parent
-server.on('listening', () => {
-  safeSend({ type: 'ready', port: DASHBOARD_PORT });
-});
-
-// Graceful shutdown helper - exit immediately
-// SSE connections keep the server alive, so we can't wait for server.close()
-function shutdown() {
-  process.exit(0);
-}
-
-// Exit if parent process dies (IPC channel closes)
-process.on('disconnect', shutdown);
-
-// Handle EPIPE errors from IPC when parent exits unexpectedly
-process.on('error', (err) => {
-  console.error('Dashboard process error:', err);
-  shutdown();
-});
-
-// Graceful shutdown
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
