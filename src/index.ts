@@ -48,6 +48,7 @@ program
     (_, prev) => (prev || 0) + 1,
     0
   )
+  .option('--dashboard', 'Run as dashboard subprocess (internal use)')
   .action(startCommand);
 
 program

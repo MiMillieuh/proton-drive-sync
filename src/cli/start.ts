@@ -10,6 +10,7 @@ import { startSignalListener, stopSignalListener, registerSignalHandler } from '
 import { acquireRunLock, releaseRunLock } from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
 import { startDashboard, stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
+import { startDashboardMode } from '../dashboard/app.js';
 import { runOneShotSync, runWatchMode } from '../sync/index.js';
 
 // ============================================================================
@@ -21,6 +22,7 @@ interface StartOptions {
   noWatch?: boolean;
   dryRun?: boolean;
   debug?: number;
+  dashboard?: boolean;
 }
 
 // ============================================================================
@@ -52,7 +54,7 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
     try {
       const client = await createClientFromTokens(storedCreds, sdkDebug);
       sendStatusToDashboard({ auth: { status: 'authenticated', username: storedCreds.username } });
-      logger.info('Authenticated.');
+      logger.info(`Authenticated as ${storedCreds.username}.`);
       return client;
     } catch (error) {
       lastError = error as Error;
@@ -86,6 +88,12 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
  * Main entry point for the sync command.
  */
 export async function startCommand(options: StartOptions): Promise<void> {
+  // If --dashboard flag is passed, run as dashboard subprocess
+  if (options.dashboard) {
+    startDashboardMode();
+    return;
+  }
+
   // Derive effective modes from flags
   const watch = !options.noWatch;
 

@@ -1,17 +1,39 @@
 /**
  * Dashboard Server - Spawns dashboard as a separate process
  *
- * The dashboard runs in its own Node.js process for true parallelism,
- * communicating via IPC for job events.
+ * The dashboard runs in its own process for true parallelism,
+ * communicating via JSON over stdin/stdout.
  */
 
-import { fork, type ChildProcess } from 'child_process';
+import { type Subprocess } from 'bun';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { watch } from 'fs';
 import { jobEvents, type JobEvent } from '../sync/queue.js';
 import { logger } from '../logger.js';
 import type { Config } from '../config.js';
+import {
+  type AuthStatusUpdate,
+  type SyncStatus,
+  type DashboardStatus,
+  type DashboardJob,
+  type DashboardDiff,
+  type ParentMessage,
+  type ChildMessage,
+  createEmptyDiff,
+  hasDiffChanges,
+  parseMessage,
+} from './ipc.js';
+
+// Re-export types for external use
+export type {
+  AuthStatus,
+  AuthStatusUpdate,
+  SyncStatus,
+  DashboardStatus,
+  DashboardJob,
+  DashboardDiff,
+} from './ipc.js';
 
 // ============================================================================
 // Constants
@@ -24,83 +46,8 @@ const __dirname = dirname(__filename);
 const DIFF_ACCUMULATE_MS = 100;
 
 // ============================================================================
-// Status Types
+// Event Accumulation
 // ============================================================================
-
-export type AuthStatus = 'unauthenticated' | 'authenticating' | 'authenticated' | 'failed';
-
-export interface AuthStatusUpdate {
-  status: AuthStatus;
-  username?: string;
-}
-
-/** Sync status enum for three-state badge */
-export type SyncStatus = 'syncing' | 'paused' | 'disconnected';
-
-/** Status struct sent on every heartbeat to the dashboard */
-export interface DashboardStatus {
-  auth: AuthStatusUpdate;
-  syncStatus: SyncStatus;
-}
-
-// ============================================================================
-// Diff Types - Accumulated changes to send to frontend
-// ============================================================================
-
-/** A job item for display in the dashboard */
-export interface DashboardJob {
-  id: number;
-  localPath: string;
-  remotePath?: string | null;
-  lastError?: string | null;
-  nRetries?: number;
-  retryAt?: Date;
-  createdAt?: Date;
-}
-
-/** Accumulated changes to send to frontend */
-export interface DashboardDiff {
-  /** Stats deltas: positive = increment, negative = decrement */
-  statsDelta: {
-    pending: number;
-    processing: number;
-    synced: number;
-    blocked: number;
-  };
-  /** Jobs to add to the processing list */
-  addProcessing: DashboardJob[];
-  /** Job IDs to remove from the processing list */
-  removeProcessing: number[];
-  /** Jobs to add to the recent (synced) list */
-  addRecent: DashboardJob[];
-  /** Jobs to add to the blocked list */
-  addBlocked: DashboardJob[];
-}
-
-/** Create an empty diff */
-function createEmptyDiff(): DashboardDiff {
-  return {
-    statsDelta: { pending: 0, processing: 0, synced: 0, blocked: 0 },
-    addProcessing: [],
-    removeProcessing: [],
-    addRecent: [],
-    addBlocked: [],
-  };
-}
-
-/** Check if a diff has any changes worth sending */
-function hasDiffChanges(diff: DashboardDiff): boolean {
-  return (
-    diff.statsDelta.pending !== 0 ||
-    diff.statsDelta.processing !== 0 ||
-    diff.statsDelta.synced !== 0 ||
-    diff.statsDelta.blocked !== 0 ||
-    diff.addProcessing.length > 0 ||
-    diff.removeProcessing.length > 0 ||
-    diff.addRecent.length > 0 ||
-    diff.addBlocked.length > 0
-  );
-}
 
 /**
  * Accumulate a job event into the current diff.
@@ -160,7 +107,10 @@ function accumulateEvent(event: JobEvent): void {
 // Server Management
 // ============================================================================
 
-let dashboardProcess: ChildProcess | null = null;
+/** Type for our dashboard subprocess with piped stdin/stdout */
+type DashboardSubprocess = Subprocess<'pipe', 'pipe', 'inherit'>;
+
+let dashboardProcess: DashboardSubprocess | null = null;
 let jobEventHandler: ((event: JobEvent) => void) | null = null;
 let accumulatedDiff: DashboardDiff = createEmptyDiff();
 let diffTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -181,6 +131,72 @@ const SYNC_HEARTBEAT_TIMEOUT_MS = 90_000;
 const HEARTBEAT_INTERVAL_MS = 1500;
 
 /**
+ * Send a message to the dashboard subprocess via stdin.
+ * Bun's stdin is a FileSink when using stdin: 'pipe'.
+ */
+function sendToChild(message: ParentMessage): void {
+  if (!dashboardProcess?.stdin) return;
+  // Bun's FileSink has a write() method that accepts strings
+  dashboardProcess.stdin.write(JSON.stringify(message) + '\n');
+}
+
+/**
+ * Read and process messages from the dashboard subprocess stdout.
+ */
+async function readChildMessages(stdout: ReadableStream<Uint8Array>): Promise<void> {
+  const reader = stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete lines
+      let newlineIdx;
+      while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, newlineIdx);
+        buffer = buffer.slice(newlineIdx + 1);
+
+        if (!line.trim()) continue;
+
+        const msg = parseMessage<ChildMessage>(line);
+        if (!msg) continue;
+
+        if (msg.type === 'ready') {
+          const isDevMode = process.env.PROTON_DEV === '1';
+          const hotReloadMsg = isDevMode ? ' (hot reload enabled)' : '';
+          logger.info(`Dashboard running at http://localhost:${msg.port}${hotReloadMsg}`);
+
+          // Send initial status when dashboard is ready
+          sendStatusToDashboard();
+
+          // Start heartbeat loop to continuously send status
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
+          heartbeatInterval = setInterval(sendStatusToDashboard, HEARTBEAT_INTERVAL_MS);
+        } else if (msg.type === 'error') {
+          logger.error(`Dashboard server error: ${msg.error} (code: ${msg.code})`);
+        } else if (msg.type === 'log') {
+          // Forward dashboard logs to main logger with [DASH] tag
+          const taggedMessage = `[DASH] ${msg.message}`;
+          logger[msg.level](taggedMessage);
+        }
+      }
+    }
+  } catch (err) {
+    // Stream closed, process likely exited
+    logger.debug(`Dashboard stdout stream closed: ${err}`);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
  * Start the dashboard in a separate process.
  */
 export function startDashboard(config: Config, dryRun = false): void {
@@ -198,47 +214,36 @@ export function startDashboard(config: Config, dryRun = false): void {
   // Determine if we're running in dev mode (set by Makefile)
   const isDevMode = process.env.PROTON_DEV === '1';
 
-  // Fork the dashboard subprocess
-  // In dev mode, use bun to run the TypeScript source directly for hot reload
+  // Spawn the dashboard subprocess
+  // Both dev and prod use the same mechanism: 'start --dashboard'
+  // In dev mode, we run via bun with the source file
+  // In production (compiled binary), we run the same binary
   if (isDevMode) {
-    const appPath = join(__dirname, 'app.ts');
-    dashboardProcess = fork(appPath, [], {
-      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-      execPath: 'bun',
+    const indexPath = join(__dirname, '..', 'index.ts');
+    dashboardProcess = Bun.spawn(['bun', indexPath, 'start', '--dashboard'], {
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'inherit',
     });
   } else {
-    const appPath = join(__dirname, 'app.js');
-    dashboardProcess = fork(appPath, [], {
-      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+    // In production, spawn the same binary with 'start --dashboard'
+    // This works with Bun's single-file executable
+    dashboardProcess = Bun.spawn([process.execPath, 'start', '--dashboard'], {
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'inherit',
     });
   }
 
-  // Handle messages from child
-  dashboardProcess.on('message', (msg: { type: string; port?: number }) => {
-    if (msg.type === 'ready') {
-      const hotReloadMsg = isDevMode ? ' (hot reload enabled)' : '';
-      logger.info(`Dashboard running at http://localhost:${msg.port}${hotReloadMsg}`);
-
-      // Send initial status when dashboard is ready
-      sendStatusToDashboard();
-
-      // Start heartbeat loop to continuously send status
-      if (heartbeatInterval) {
-        clearInterval(heartbeatInterval);
-      }
-      heartbeatInterval = setInterval(sendStatusToDashboard, HEARTBEAT_INTERVAL_MS);
-    }
-  });
-
-  // Handle child process errors
-  dashboardProcess.on('error', (err) => {
-    logger.error(`Dashboard process error: ${err.message}`);
-  });
+  // Read messages from child stdout
+  if (dashboardProcess.stdout) {
+    readChildMessages(dashboardProcess.stdout);
+  }
 
   // Handle child process exit
-  dashboardProcess.on('exit', (code, signal) => {
-    if (code !== 0 && signal !== 'SIGTERM') {
-      logger.warn(`Dashboard process exited with code ${code}, signal ${signal}`);
+  dashboardProcess.exited.then((code) => {
+    if (code !== 0) {
+      logger.warn(`Dashboard process exited with code ${code}`);
     }
     dashboardProcess = null;
     if (jobEventHandler) {
@@ -248,11 +253,11 @@ export function startDashboard(config: Config, dryRun = false): void {
   });
 
   // Send initial config
-  dashboardProcess.send({ type: 'config', config, dryRun });
+  sendToChild({ type: 'config', config, dryRun });
 
-  // Forward job events to child process via IPC (accumulated into diffs)
+  // Forward job events to child process via stdin (accumulated into diffs)
   jobEventHandler = (event: JobEvent) => {
-    if (!dashboardProcess?.connected) return;
+    if (!dashboardProcess) return;
 
     // Accumulate the event into the diff based on event type
     accumulateEvent(event);
@@ -261,8 +266,8 @@ export function startDashboard(config: Config, dryRun = false): void {
     if (!diffTimeout) {
       diffTimeout = setTimeout(() => {
         diffTimeout = null;
-        if (dashboardProcess?.connected && hasDiffChanges(accumulatedDiff)) {
-          dashboardProcess.send({ type: 'job_state_diff', diff: accumulatedDiff });
+        if (dashboardProcess && hasDiffChanges(accumulatedDiff)) {
+          sendToChild({ type: 'job_state_diff', diff: accumulatedDiff });
           accumulatedDiff = createEmptyDiff();
         }
       }, DIFF_ACCUMULATE_MS);
@@ -301,11 +306,9 @@ export async function stopDashboard(): Promise<void> {
     const proc = dashboardProcess;
     dashboardProcess = null;
 
-    // Wait for process to exit
-    await new Promise<void>((resolve) => {
-      proc.once('exit', resolve);
-      proc.kill('SIGTERM');
-    });
+    // Kill and wait for process to exit
+    proc.kill();
+    await proc.exited;
 
     logger.debug('Dashboard process stopped');
   }
@@ -326,11 +329,12 @@ function setupHotReload(): void {
   const dashboardDir = __dirname.includes('dist')
     ? __dirname.replace('/dist/', '/src/')
     : __dirname;
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   logger.info(`Dashboard hot reload enabled, watching ${dashboardDir}`);
 
-  fileWatcher = watch(dashboardDir, { recursive: true }, (eventType, filename) => {
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  fileWatcher = watch(dashboardDir, { recursive: true }, (_eventType, filename) => {
     if (
       !filename ||
       (!filename.endsWith('.ts') && !filename.endsWith('.tsx') && !filename.endsWith('.html'))
@@ -386,20 +390,13 @@ async function restartDashboard(): Promise<void> {
       const proc = dashboardProcess;
       dashboardProcess = null;
 
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          logger.warn('Dashboard process did not exit gracefully during restart, sending SIGKILL');
-          proc.kill('SIGKILL');
-          resolve();
-        }, 2000);
-
-        proc.once('exit', () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-
-        proc.kill('SIGTERM');
-      });
+      // Kill and wait with timeout
+      proc.kill();
+      const timeout = setTimeout(() => {
+        logger.warn('Dashboard process did not exit gracefully during restart');
+      }, 2000);
+      await proc.exited;
+      clearTimeout(timeout);
     }
 
     // Now safe to restart
@@ -437,7 +434,7 @@ export function sendStatusToDashboard(options?: {
     lastSyncHeartbeat = Date.now();
     lastPausedState = options.paused;
   }
-  if (!dashboardProcess?.connected) return;
+  if (!dashboardProcess) return;
 
   // Determine sync status
   const heartbeatRecent = Date.now() - lastSyncHeartbeat < SYNC_HEARTBEAT_TIMEOUT_MS;
@@ -467,10 +464,10 @@ export function sendStatusToDashboard(options?: {
     getUsername(lastSentStatus.auth) !== getUsername(status.auth);
 
   if (hasChanged) {
-    dashboardProcess.send({ type: 'status', ...status });
+    sendToChild({ type: 'status', ...status });
     lastSentStatus = status;
   } else {
     // Always send heartbeat to keep SSE connection alive
-    dashboardProcess.send({ type: 'heartbeat' });
+    sendToChild({ type: 'heartbeat' });
   }
 }

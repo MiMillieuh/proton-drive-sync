@@ -1,8 +1,8 @@
 /**
  * Dashboard Subprocess Entry Point
  *
- * This file runs as a separate Node.js process, forked from the main sync process.
- * It communicates with the parent via IPC for job events (received as diffs).
+ * This file runs as a separate process, spawned from the main sync process.
+ * It communicates with the parent via JSON over stdin/stdout.
  *
  * Uses htmx with SSE - sends HTML fragments for live updates.
  */
@@ -28,7 +28,7 @@ import {
 } from '../sync/queue.js';
 import { FLAGS, setFlag, clearFlag, hasFlag } from '../flags.js';
 import { sendSignal } from '../signals.js';
-import { logger, disableConsoleLogging } from '../logger.js';
+import { logger, enableIpcLogging } from '../logger.js';
 import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
 import {
   isServiceInstalled,
@@ -36,13 +36,17 @@ import {
   unloadSyncService,
   serviceInstallCommand,
 } from '../cli/service.js';
-import type {
-  DashboardDiff,
-  AuthStatusUpdate,
-  DashboardJob,
-  DashboardStatus,
-  SyncStatus,
-} from './server.js';
+import {
+  type DashboardDiff,
+  type AuthStatusUpdate,
+  type DashboardJob,
+  type DashboardStatus,
+  type SyncStatus,
+  type ParentMessage,
+  type ChildMessage,
+  sendToParent,
+  parseMessage,
+} from './ipc.js';
 import type { Config } from '../config.js';
 
 // ============================================================================
@@ -77,23 +81,20 @@ let currentSyncStatus: SyncStatus = 'disconnected';
 let currentConfig: Config | null = null;
 let loggedAuthUser: string | null = null; // Track logged auth to avoid duplicate logs
 
-// Disable console logging when not connected to a TTY (running as background service)
-if (!process.stdout.isTTY) {
-  disableConsoleLogging();
-}
+/**
+ * Read and process messages from parent process via stdin.
+ * Messages are newline-delimited JSON.
+ */
+async function readParentMessages(): Promise<void> {
+  const rl = createInterface({ input: process.stdin });
 
-// Listen for diff events from parent process via IPC
-process.on(
-  'message',
-  (msg: {
-    type: string;
-    diff?: DashboardDiff;
-    dryRun?: boolean;
-    config?: Config;
-    auth?: AuthStatusUpdate;
-    syncStatus?: SyncStatus;
-  }) => {
-    if (msg.type === 'job_state_diff' && msg.diff) {
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+
+    const msg = parseMessage<ParentMessage>(line);
+    if (!msg) continue;
+
+    if (msg.type === 'job_state_diff') {
       stateDiffEvents.emit('job_state_diff', msg.diff);
     } else if (msg.type === 'config') {
       if (msg.dryRun !== undefined) isDryRun = msg.dryRun;
@@ -113,7 +114,10 @@ process.on(
       heartbeatEvents.emit('heartbeat');
     }
   }
-);
+
+  // stdin closed - parent exited, shut down
+  process.exit(0);
+}
 
 // ============================================================================
 // HTML Fragment Renderers
@@ -1536,29 +1540,32 @@ app.get('/api/logs', async (c) => {
 // Start Server
 // ============================================================================
 
-// Only start the server if this file is being run as a forked subprocess (with IPC channel)
-// This prevents the server from starting when bun --watch scans/loads the file directly
-const isForkedSubprocess = typeof process.send === 'function';
+/**
+ * Start the dashboard server. Called via 'start --dashboard' command.
+ * Communicates with parent process via stdin (receive) and stdout (send).
+ */
+export function runDashboardServer(): void {
+  // The dashboard subprocess communicates with the sync client via stdin/stdout:
+  // - stdin: receives JSON messages from parent (config, status updates, heartbeats)
+  // - stdout: sends JSON messages to parent (ready signal, errors, log messages)
+  // Console logging is replaced with IPC logging so logs appear in the main process.
+  enableIpcLogging();
 
-if (isForkedSubprocess) {
   const server = serve({
     fetch: app.fetch,
     port: DASHBOARD_PORT,
   });
 
   /**
-   * Safely send IPC message to parent process.
-   * If the parent has exited, the send will fail with EPIPE - we handle this gracefully.
+   * Safely send IPC message to parent process via stdout.
    */
-  function safeSend(message: Record<string, unknown>): void {
-    if (process.send) {
-      try {
-        process.send(message);
-      } catch {
-        // Parent process has exited, shut down gracefully
-        server.close();
-        process.exit(0);
-      }
+  function safeSend(message: ChildMessage): void {
+    try {
+      sendToParent(message);
+    } catch {
+      // stdout closed, parent exited - shut down gracefully
+      server.close();
+      process.exit(0);
     }
   }
 
@@ -1573,21 +1580,21 @@ if (isForkedSubprocess) {
     safeSend({ type: 'ready', port: DASHBOARD_PORT });
   });
 
+  // Start reading messages from parent via stdin
+  readParentMessages();
+
   // Graceful shutdown helper - exit immediately
   // SSE connections keep the server alive, so we can't wait for server.close()
   function shutdown() {
     process.exit(0);
   }
 
-  // Exit if parent process dies (IPC channel closes)
-  process.on('disconnect', shutdown);
-
-  // Handle EPIPE errors from IPC when parent exits unexpectedly
-  process.on('error', () => {
-    shutdown();
-  });
-
   // Graceful shutdown
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+}
+
+/** Entry point - called when running as dashboard subprocess via 'start --dashboard' */
+export function startDashboardMode(): void {
+  runDashboardServer();
 }

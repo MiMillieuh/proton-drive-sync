@@ -4,6 +4,7 @@
  * Logs to both file and console by default.
  * In daemon mode, console logging is disabled.
  * In dry-run mode, file logging is disabled and [DRY-RUN] prefix is added.
+ * In dashboard mode, logs are sent via stdout JSON IPC to parent process.
  *
  * Log file is circular: rotates at 1MB, keeps only the current file.
  */
@@ -70,4 +71,32 @@ export function enableDebug(): void {
  */
 export function isDebugEnabled(): boolean {
   return logger.level === 'debug';
+}
+
+/**
+ * Enable IPC logging mode for dashboard subprocess.
+ * Removes file and console transports, adds a custom transport that sends
+ * log messages as JSON to stdout for the parent process to handle.
+ */
+export function enableIpcLogging(): void {
+  // Remove all existing transports
+  logger.clear();
+
+  // Add custom IPC transport that writes JSON to stdout
+  const ipcTransport = new winston.transports.Stream({
+    stream: process.stdout,
+    format: winston.format.printf(({ level, message }) => {
+      // Strip ANSI color codes from level if present (ESC char + [...m sequence)
+      const ESC = String.fromCharCode(27);
+      const cleanLevel = level.replace(new RegExp(ESC + '\\[[0-9;]*m', 'g'), '');
+      const logMessage = {
+        type: 'log',
+        level: cleanLevel as 'error' | 'warn' | 'info' | 'debug',
+        message: String(message),
+      };
+      return JSON.stringify(logMessage);
+    }),
+  });
+
+  logger.add(ipcTransport);
 }
