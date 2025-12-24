@@ -59,7 +59,7 @@ const statusEvents = new EventEmitter();
 const heartbeatEvents = new EventEmitter();
 
 // Current status (for API endpoint)
-let currentAuthStatus: AuthStatusUpdate = { status: 'pending' };
+let currentAuthStatus: AuthStatusUpdate = { status: 'unauthenticated' };
 let currentIsPaused = false;
 let currentConfig: Config | null = null;
 
@@ -174,13 +174,14 @@ function renderProcessingList(jobs: DashboardJob[]): string {
 </div>`;
   }
 
-  // When paused, show clock icon; when active, show spinning refresh icon
-  const icon = currentIsPaused
-    ? `<svg class="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>`
-    : `<svg class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+  // When paused or not authenticated, show clock icon; when active and authenticated, show spinning refresh icon
+  const isActive = !currentIsPaused && currentAuthStatus.status === 'authenticated';
+  const icon = isActive
+    ? `<svg class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>`
+    : `<svg class="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>`;
 
   return `<div class="space-y-1">${jobs
@@ -333,11 +334,11 @@ function renderRetryAllButton(shouldRender: boolean): string {
 /** Render auth status HTML */
 function renderAuthStatus(auth: AuthStatusUpdate): string {
   const statusConfig = {
-    pending: {
+    unauthenticated: {
       border: 'border-gray-500/30 bg-gray-500/10',
       icon: `<svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
       text: 'text-gray-400',
-      label: 'Waiting for auth...',
+      label: 'Not authenticated',
     },
     authenticating: {
       border: 'border-amber-500/30 bg-amber-500/10',
@@ -433,8 +434,19 @@ function renderDryRunBanner(dryRun: boolean): string {
 </div>`;
 }
 
-/** Render processing box title based on pause state */
+/** Render processing box title based on pause state and auth status */
 function renderProcessingTitle(isPaused: boolean): string {
+  if (currentAuthStatus.status !== 'authenticated') {
+    return `
+<span class="w-2 h-2 rounded-full bg-amber-500"></span>
+Held Transfers
+<div class="relative group">
+  <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
+  <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-80 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 normal-case font-normal">
+    Transfers are held until you authenticate
+  </div>
+</div>`;
+  }
   if (isPaused) {
     return `
 <span class="w-2 h-2 rounded-full bg-amber-500"></span>
@@ -593,9 +605,12 @@ const HOME_PAGE_SCRIPTS = `
   updateRetryCountdowns();
 
   // Re-initialize Lucide icons after SSE updates
-  document.body.addEventListener('htmx:afterSwap', () => {
+  document.body.addEventListener('htmx:afterSwap', (e) => {
     lucide.createIcons();
     updateRetryCountdowns();
+  });
+  document.body.addEventListener('htmx:sseMessage', () => {
+    lucide.createIcons();
   });
 </script>`;
 

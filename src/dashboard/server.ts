@@ -28,7 +28,7 @@ const DIFF_ACCUMULATE_MS = 100;
 // Status Types
 // ============================================================================
 
-export type AuthStatus = 'pending' | 'authenticating' | 'authenticated' | 'failed';
+export type AuthStatus = 'unauthenticated' | 'authenticating' | 'authenticated' | 'failed';
 
 export interface AuthStatusUpdate {
   status: AuthStatus;
@@ -166,7 +166,7 @@ let fileWatcher: ReturnType<typeof watch> | null = null;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let currentConfig: Config | null = null;
 let currentDryRun = false;
-let currentAuthStatus: AuthStatusUpdate = { status: 'pending' };
+let currentAuthStatus: AuthStatusUpdate = { status: 'unauthenticated' };
 let lastSentStatus: DashboardStatus | null = null;
 
 // Heartbeat interval (1.5 seconds) - checks for status changes
