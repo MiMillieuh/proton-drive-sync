@@ -333,7 +333,7 @@ function renderPausedBadge(isPaused: boolean): string {
 function renderSyncingBadge(syncStatus: SyncStatus): string {
   if (syncStatus === 'syncing') {
     return `
-<div class="h-9 flex items-center gap-2 px-3 rounded-full bg-gray-900 border border-green-500/30 bg-green-500/10">
+<div class="h-9 flex items-center gap-2 px-3 rounded-full border border-green-500/30 bg-green-500/10">
   <div class="relative flex h-2.5 w-2.5">
     <span id="heartbeat-ping" class="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-0"></span>
     <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
@@ -343,7 +343,7 @@ function renderSyncingBadge(syncStatus: SyncStatus): string {
   }
   if (syncStatus === 'paused') {
     return `
-<div class="h-9 flex items-center gap-2 px-3 rounded-full bg-gray-900 border border-amber-500/30 bg-amber-500/10">
+<div class="h-9 flex items-center gap-2 px-3 rounded-full border border-amber-500/30 bg-amber-500/10">
   <div class="relative flex h-2.5 w-2.5">
     <span id="heartbeat-ping" class="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-0"></span>
     <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
@@ -353,7 +353,7 @@ function renderSyncingBadge(syncStatus: SyncStatus): string {
   }
   // disconnected
   return `
-<div class="h-9 flex items-center gap-2 px-3 rounded-full bg-gray-900 border border-red-500/30 bg-red-500/10">
+<div class="h-9 flex items-center gap-2 px-3 rounded-full border border-red-500/30 bg-red-500/10">
   <div class="relative flex h-2.5 w-2.5">
     <span id="heartbeat-ping" class="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-0"></span>
     <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
@@ -550,6 +550,12 @@ async function composePage(
       ? 'text-white border-b-2 border-white'
       : 'text-gray-400 hover:text-white';
 
+  // Get current state for server-side rendering of badges
+  const s = snapshot();
+  const authStatusContent = renderAuthStatus(s.auth);
+  const syncingStatusContent = renderSyncingBadge(s.syncStatus);
+  const dryRunBannerContent = renderDryRunBanner(s.dryRun);
+
   return layoutHtml
     .replace('{{TITLE}}', options.title)
     .replace('{{HOME_TAB_CLASS}}', homeTabClass)
@@ -557,6 +563,9 @@ async function composePage(
     .replace('{{ABOUT_TAB_CLASS}}', aboutTabClass)
     .replace('{{HIDE_HOME_TAB}}', isOnboarded ? '' : 'hidden')
     .replace('{{HIDE_BADGES}}', options.activeTab === 'about' ? 'hidden' : '')
+    .replace('{{AUTH_STATUS_CONTENT}}', authStatusContent)
+    .replace('{{SYNCING_STATUS_CONTENT}}', syncingStatusContent)
+    .replace('{{DRY_RUN_BANNER_CONTENT}}', dryRunBannerContent)
     .replace('{{CONTENT}}', contentHtml)
     .replace('{{PAGE_SCRIPTS}}', options.pageScripts);
 }
@@ -573,7 +582,19 @@ app.get('/', async (c) => {
     return c.redirect('/controls');
   }
   const layout = getLayout();
-  const html = await composePage(layout, homeHtmlTemplate, {
+  const s = snapshot();
+
+  // Server-side render all home page fragments
+  const homeContent = homeHtmlTemplate
+    .replace('{{STATS_CONTENT}}', renderFragment(FRAG.stats, s))
+    .replace('{{CONFIG_INFO_CONTENT}}', renderFragment(FRAG.configInfo, s))
+    .replace('{{PENDING_QUEUE_CONTENT}}', renderFragment(FRAG.pendingQueue, s))
+    .replace('{{PROCESSING_QUEUE_CONTENT}}', renderFragment(FRAG.processingQueue, s))
+    .replace('{{RECENT_QUEUE_CONTENT}}', renderFragment(FRAG.recentQueue, s))
+    .replace('{{RETRY_QUEUE_CONTENT}}', renderFragment(FRAG.retryQueue, s))
+    .replace('{{BLOCKED_QUEUE_CONTENT}}', renderFragment(FRAG.blockedQueue, s));
+
+  const html = await composePage(layout, homeContent, {
     title: 'Proton Drive Sync',
     activeTab: 'home',
     pageScripts: homeScripts,
@@ -584,8 +605,14 @@ app.get('/', async (c) => {
 // Serve controls page
 app.get('/controls', async (c) => {
   const layout = getLayout();
-  let content = controlsHtmlTemplate;
+  const s = snapshot();
   const isOnboarding = !hasFlag(FLAGS.ONBOARDED);
+
+  // Server-side render stop-section fragment
+  let content = controlsHtmlTemplate.replace(
+    '{{STOP_SECTION_CONTENT}}',
+    renderFragment(FRAG.stopSection, s)
+  );
 
   // Replace button text/icons based on onboarding state
   content = content

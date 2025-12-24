@@ -104,13 +104,9 @@
       </div>
 
       <!-- Stop Service -->
-      <div
-        id="stop-section"
-        hx-get="/api/fragments/stop-section"
-        hx-trigger="load"
-        hx-swap="innerHTML"
-        sse-swap="stop-section"
-      ></div>
+      <div id="stop-section" hx-swap="innerHTML" sse-swap="stop-section">
+        {{STOP_SECTION_CONTENT}}
+      </div>
     </div>
   </div>
 </div>

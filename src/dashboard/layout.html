@@ -123,12 +123,9 @@
   </head>
   <body class="h-full flex flex-col" hx-ext="sse,morph" sse-connect="/api/events">
     <!-- Dry-Run Warning Banner -->
-    <div
-      id="dry-run-banner"
-      hx-get="/api/fragments/dry-run-banner"
-      hx-trigger="load"
-      hx-swap="outerHTML"
-    ></div>
+    <div id="dry-run-banner" hx-swap="outerHTML" sse-swap="dry-run-banner">
+      {{DRY_RUN_BANNER_CONTENT}}
+    </div>
 
     <!-- Hidden heartbeat listener to trigger pulse animation -->
     <div
@@ -223,24 +220,19 @@
           </div>
 
           <!-- Auth Status: third to collapse (below 550px) -->
-          <div
-            id="auth-status"
-            class="auth-badge"
-            hx-get="/api/fragments/auth-status"
-            hx-trigger="load"
-            hx-swap="morph:innerHTML"
-            sse-swap="auth"
-          ></div>
+          <div id="auth-status" class="auth-badge" hx-swap="morph:innerHTML" sse-swap="auth">
+            {{AUTH_STATUS_CONTENT}}
+          </div>
 
           <!-- Syncing Status: last to collapse (below 500px) -->
           <div
             id="syncing-status"
             class="connected-badge"
-            hx-get="/api/fragments/syncing-status"
-            hx-trigger="load"
             hx-swap="morph:innerHTML"
             sse-swap="syncing"
-          ></div>
+          >
+            {{SYNCING_STATUS_CONTENT}}
+          </div>
         </div>
       </div>
     </header>
