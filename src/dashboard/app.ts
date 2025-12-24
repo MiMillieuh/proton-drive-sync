@@ -761,7 +761,7 @@ const SETTINGS_PAGE_SCRIPTS = `
     // Validate
     const validDirs = syncDirs.filter((d) => d.source_path.trim());
     if (validDirs.length === 0) {
-      saveStatus.textContent = 'At least one directory is required';
+      saveStatus.textContent = 'At least one sync directory is required';
       saveStatus.className = 'text-sm text-red-400';
       return;
     }
