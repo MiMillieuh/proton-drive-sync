@@ -278,7 +278,6 @@ export function startDashboard(config: Config, dryRun = false): void {
 
 /**
  * Stop the dashboard process.
- * Waits for the process to exit gracefully, with a timeout fallback to SIGKILL.
  */
 export async function stopDashboard(): Promise<void> {
   // Stop heartbeat
@@ -302,20 +301,9 @@ export async function stopDashboard(): Promise<void> {
     const proc = dashboardProcess;
     dashboardProcess = null;
 
-    // Wait for process to exit with timeout
+    // Wait for process to exit
     await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        logger.warn('Dashboard process did not exit gracefully, sending SIGKILL');
-        proc.kill('SIGKILL');
-        resolve();
-      }, 2000);
-
-      proc.once('exit', () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-
-      // Gracefully terminate the child process
+      proc.once('exit', resolve);
       proc.kill('SIGTERM');
     });
 
