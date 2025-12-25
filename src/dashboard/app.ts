@@ -314,7 +314,7 @@ function renderStopSection(syncStatus: string): string {
     <button
       onclick="stopService()"
       id="stop-button"
-      class="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+      class="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors"
     >
       <i data-lucide="square" class="w-4 h-4"></i>
       Stop
@@ -523,7 +523,7 @@ let isDryRun = false;
 
 /** Get controls scripts with redirect URL injected */
 function controlsScriptsWithRedirect(isOnboarding: boolean): string {
-  const redirectUrl = isOnboarding ? '/' : '/controls';
+  const redirectUrl = isOnboarding ? '/about' : '';
   return controlsScriptsHtml.replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl);
 }
 

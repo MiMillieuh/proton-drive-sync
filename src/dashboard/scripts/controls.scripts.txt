@@ -186,11 +186,11 @@
       const result = await response.json();
 
       if (result.success) {
-        showToast('Settings saved successfully!', 'success');
-        // Redirect to about page after successful save only during onboarding
         if (redirectAfterSave) {
+          // During onboarding, redirect immediately without toast
           window.location.href = redirectAfterSave;
         } else {
+          showToast('Settings saved successfully!', 'success');
           originalConfig = JSON.parse(JSON.stringify(config));
           syncDirs = config.sync_dirs;
           renderSyncDirs();

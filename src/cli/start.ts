@@ -29,6 +29,10 @@ interface StartOptions {
 // Authentication
 // ============================================================================
 
+// Retry delays in seconds (array length determines max retries)
+const NETWORK_DELAYS = [1, 4, 16, 64, 256];
+const RATE_LIMIT_DELAYS = [32, 128, 512, 512, 512];
+
 /**
  * Authenticate using stored tokens with retry and exponential backoff.
  * Sends status updates to the dashboard via IPC.
@@ -36,7 +40,6 @@ interface StartOptions {
  */
 async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClient> {
   const storedCreds = await getStoredCredentials();
-
   if (!storedCreds) {
     sendStatusToDashboard({ auth: { status: 'failed' } });
     throw new Error('No credentials found. Run `proton-drive-sync auth` first.');
@@ -44,11 +47,18 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
 
   logger.info('Authenticating with stored tokens...');
 
-  // Retry with exponential backoff: 1s, 4s, 16s, 64s, 256s
-  const MAX_RETRIES = 5;
-  let lastError: Error | null = null;
+  const getRetryDelays = (error: Error): number[] | null => {
+    if (error.message.includes('Too many recent API requests')) return RATE_LIMIT_DELAYS;
+    if (
+      error.message.includes('fetch failed') ||
+      error.message.includes('socket connection was closed')
+    ) {
+      return NETWORK_DELAYS;
+    }
+    return null;
+  };
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; ; attempt++) {
     sendStatusToDashboard({ auth: { status: 'authenticating' } });
 
     try {
@@ -57,30 +67,21 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
       logger.info(`Authenticated as ${storedCreds.username}.`);
       return client;
     } catch (error) {
-      lastError = error as Error;
+      const err = error as Error;
+      const delays = getRetryDelays(err);
 
-      // Only retry on network errors (fetch failed, socket closed, etc.)
-      const isNetworkError =
-        lastError.message.includes('fetch failed') ||
-        lastError.message.includes('socket connection was closed');
-      if (!isNetworkError) {
+      if (!delays || attempt >= delays.length) {
         sendStatusToDashboard({ auth: { status: 'failed' } });
-        throw lastError;
+        throw err;
       }
 
-      if (attempt < MAX_RETRIES - 1) {
-        const delayMs = Math.pow(4, attempt) * 1000; // 1s, 4s, 16s, 64s
-        sendStatusToDashboard({ auth: { status: 'authenticating' } });
-        logger.warn(
-          `Authentication failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delayMs / 1000}s: ${lastError.message}`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
+      const delaySec = delays[attempt];
+      logger.warn(
+        `Authentication failed (attempt ${attempt + 1}/${delays.length}), retrying in ${delaySec}s: ${err.message}`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delaySec * 1000));
     }
   }
-
-  sendStatusToDashboard({ auth: { status: 'failed' } });
-  throw lastError;
 }
 
 // ============================================================================
