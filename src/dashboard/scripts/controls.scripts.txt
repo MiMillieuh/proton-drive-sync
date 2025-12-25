@@ -1,25 +1,8 @@
 <script>
-  let syncDirs = [];
-  let originalConfig = null;
-  let serviceEnabled = false;
+  let syncDirs = {{SYNC_DIRS_JSON}};
+  let originalConfig = { sync_concurrency: {{SYNC_CONCURRENCY}}, sync_dirs: syncDirs };
+  let serviceEnabled = {{SERVICE_ENABLED}};
   const redirectAfterSave = '{{REDIRECT_AFTER_SAVE}}';
-
-  // Load current config and service status on page load
-  async function loadConfig() {
-    try {
-      const response = await fetch('/api/config');
-      const data = await response.json();
-      const config = data.config;
-      originalConfig = JSON.parse(JSON.stringify(config));
-
-      document.getElementById('sync-concurrency').value = config.sync_concurrency || 8;
-      document.getElementById('concurrency-value').textContent = config.sync_concurrency || 8;
-      syncDirs = config.sync_dirs || [];
-      renderSyncDirs();
-    } catch (err) {
-      console.error('Failed to load config:', err);
-    }
-  }
 
   async function loadServiceStatus() {
     try {
@@ -229,7 +212,6 @@
     }
   }
 
-  // Load config and service status on page load
-  loadConfig();
+  // Load service status on page load (for toggle sync)
   loadServiceStatus();
 </script>

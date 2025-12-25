@@ -303,7 +303,7 @@ function renderStopSection(syncStatus: string): string {
 <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <h3 class="text-lg font-semibold text-white">Stop Proton Drive Sync</h3>
+      <h3 class="text-lg font-semibold text-white">Shut Down</h3>
       <div class="relative group flex items-center">
         <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
         <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
@@ -444,6 +444,55 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;');
 }
 
+/** Render sync directories HTML for SSR */
+function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
+  return dirs
+    .map(
+      (dir, index) => `
+      <div class="flex items-center gap-3 p-4 bg-gray-900 border border-gray-700 rounded-lg group">
+        <div class="flex-1 grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Local Path</label>
+            <input
+              type="text"
+              value="${escapeHtml(dir.source_path)}"
+              onchange="updateSyncDir(${index}, 'source_path', this.value)"
+              placeholder="/path/to/local/directory"
+              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
+            />
+          </div>
+          <div>
+            <div class="flex items-center gap-1 mb-1">
+              <label class="block text-xs text-gray-500">Remote Root</label>
+              <div class="relative group">
+                <i data-lucide="info" class="w-3 h-3 text-gray-500 cursor-help"></i>
+                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                  The destination folder in Proton Drive. Must start with / indicating the base of the Proton Drive filesystem.
+                </div>
+              </div>
+            </div>
+            <input
+              type="text"
+              value="${escapeHtml(dir.remote_root || '/')}"
+              onchange="updateSyncDir(${index}, 'remote_root', this.value)"
+              placeholder="/"
+              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
+            />
+          </div>
+        </div>
+        <button
+          onclick="removeSyncDir(${index})"
+          class="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+          title="Remove directory"
+        >
+          <i data-lucide="trash-2" class="w-5 h-5"></i>
+        </button>
+      </div>
+    `
+    )
+    .join('');
+}
+
 /** Render config info HTML */
 function renderConfigInfo(config: Config | null): string {
   if (!config) return '';
@@ -521,10 +570,19 @@ export function renderFragment(key: FragmentKey, s: DashboardSnapshot): string {
 const app = new Hono();
 let isDryRun = false;
 
-/** Get controls scripts with redirect URL injected */
-function controlsScriptsWithRedirect(isOnboarding: boolean): string {
+/** Get controls scripts with all values injected */
+function controlsScriptsWithValues(
+  isOnboarding: boolean,
+  syncDirs: Array<{ source_path: string; remote_root?: string }>,
+  syncConcurrency: number,
+  serviceEnabled: boolean
+): string {
   const redirectUrl = isOnboarding ? '/about' : '';
-  return controlsScriptsHtml.replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl);
+  return controlsScriptsHtml
+    .replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl)
+    .replace('{{SYNC_DIRS_JSON}}', JSON.stringify(syncDirs))
+    .replace('{{SYNC_CONCURRENCY}}', String(syncConcurrency))
+    .replace('{{SERVICE_ENABLED}}', serviceEnabled ? 'true' : 'false');
 }
 
 /**
@@ -619,6 +677,29 @@ app.get('/controls', async (c) => {
     renderFragment(FRAG.stopSection, s)
   );
 
+  // Server-side render start-on-login toggle state
+  const serviceEnabled = hasFlag(FLAGS.SERVICE_LOADED);
+  content = content
+    .replace('{{TOGGLE_BG_CLASS}}', serviceEnabled ? 'bg-proton' : 'bg-gray-600')
+    .replace('{{TOGGLE_ARIA_CHECKED}}', serviceEnabled ? 'true' : 'false')
+    .replace('{{TOGGLE_KNOB_CLASS}}', serviceEnabled ? 'translate-x-6' : 'translate-x-1');
+
+  // Server-side render sync concurrency and directories
+  const syncConcurrency = currentConfig?.sync_concurrency ?? 8;
+  const syncDirs = currentConfig?.sync_dirs ?? [];
+  const syncDirsHtml = syncDirs.length > 0 ? renderSyncDirsHtml(syncDirs) : '';
+  const showNoDirsMessage = syncDirs.length === 0;
+
+  content = content
+    .replace(/\{\{SYNC_CONCURRENCY\}\}/g, String(syncConcurrency))
+    .replace('{{SYNC_DIRS_HTML}}', syncDirsHtml);
+
+  // Show/hide "no dirs" message based on whether we have sync dirs
+  content = content.replace(
+    'id="no-dirs-message" class="hidden',
+    `id="no-dirs-message" class="${showNoDirsMessage ? '' : 'hidden'}`
+  );
+
   // Replace button text/icons based on onboarding state
   content = content
     .replace('{{SAVE_BUTTON_TEXT}}', isOnboarding ? 'Next' : 'Save')
@@ -628,7 +709,7 @@ app.get('/controls', async (c) => {
   const html = await composePage(layout, content, {
     title: 'Controls - Proton Drive Sync',
     activeTab: 'controls',
-    pageScripts: controlsScriptsWithRedirect(isOnboarding),
+    pageScripts: controlsScriptsWithValues(isOnboarding, syncDirs, syncConcurrency, serviceEnabled),
     isOnboarded: !isOnboarding,
   });
   return c.html(html);
