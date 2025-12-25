@@ -52,6 +52,13 @@ export function waitForActiveTasks(): Promise<void> {
 }
 
 /**
+ * Get the number of currently active tasks.
+ */
+export function getActiveTaskCount(): number {
+  return activeTasks.size;
+}
+
+/**
  * Process all pending jobs until queue is empty (blocking).
  * Used for one-shot sync mode.
  */

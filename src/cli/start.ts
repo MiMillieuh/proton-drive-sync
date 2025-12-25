@@ -59,8 +59,11 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
     } catch (error) {
       lastError = error as Error;
 
-      // Only retry on network errors (fetch failed)
-      if (!lastError.message.includes('fetch failed')) {
+      // Only retry on network errors (fetch failed, socket closed, etc.)
+      const isNetworkError =
+        lastError.message.includes('fetch failed') ||
+        lastError.message.includes('socket connection was closed');
+      if (!isNetworkError) {
         sendStatusToDashboard({ auth: { status: 'failed' } });
         throw lastError;
       }
@@ -69,7 +72,7 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
         const delayMs = Math.pow(4, attempt) * 1000; // 1s, 4s, 16s, 64s
         sendStatusToDashboard({ auth: { status: 'authenticating' } });
         logger.warn(
-          `Authentication failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delayMs / 1000}s...`
+          `Authentication failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delayMs / 1000}s: ${lastError.message}`
         );
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
@@ -213,7 +216,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
     client = await authenticateWithStatus(sdkDebug);
   } catch (error) {
     logger.error(`Authentication failed: ${error}`);
-    cleanup();
+    await cleanup();
     process.exit(1);
   }
 
@@ -227,7 +230,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
     }
   } catch (error) {
     logger.error(`Sync failed: ${error}`);
-    cleanup();
+    await cleanup();
     process.exit(1);
   }
 

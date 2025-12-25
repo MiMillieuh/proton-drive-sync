@@ -61,6 +61,7 @@ import controlsHtml from './controls.html.txt';
 import aboutHtml from './about.html.txt';
 
 // Embed page scripts at compile time
+import layoutScriptsHtml from './scripts/layout.scripts.txt';
 import homeScriptsHtml from './scripts/home.scripts.txt';
 import controlsScriptsHtml from './scripts/controls.scripts.txt';
 import aboutScriptsHtml from './scripts/about.scripts.txt';
@@ -570,6 +571,7 @@ async function composePage(
     .replace('{{SYNCING_STATUS_CONTENT}}', syncingStatusContent)
     .replace('{{DRY_RUN_BANNER_CONTENT}}', dryRunBannerContent)
     .replace('{{CONTENT}}', contentHtml)
+    .replace('{{LAYOUT_SCRIPTS}}', layoutScriptsHtml)
     .replace('{{PAGE_SCRIPTS}}', options.pageScripts);
 }
 

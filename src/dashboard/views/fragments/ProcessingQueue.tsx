@@ -51,7 +51,7 @@ export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus
                   {isActive ? (
                     <i
                       data-lucide="refresh-cw"
-                      class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 animate-spin"
+                      class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 js-spin"
                     ></i>
                   ) : (
                     <i data-lucide="clock" class="w-4 h-4 text-amber-500 mt-0.5 shrink-0"></i>

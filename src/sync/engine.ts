@@ -24,6 +24,7 @@ import { enqueueJob } from './queue.js';
 import {
   processAvailableJobs,
   waitForActiveTasks,
+  getActiveTaskCount,
   drainQueue,
   setSyncConcurrency,
 } from './processor.js';
@@ -35,6 +36,9 @@ import {
 // Polling interval for processing jobs in watch mode (2 seconds)
 // Also serves as the dashboard heartbeat interval
 const JOB_POLL_INTERVAL_MS = 2_000;
+
+// Timeout for graceful shutdown (2 seconds)
+const SHUTDOWN_TIMEOUT_MS = 2_000;
 
 // ============================================================================
 // Types
@@ -243,8 +247,17 @@ function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): Proc
         clearTimeout(timeoutId);
         timeoutId = null;
       }
-      // Wait for active tasks to complete
-      await waitForActiveTasks();
+      // Wait for active tasks to complete (with timeout)
+      const timeoutPromise = new Promise<'timeout'>((resolve) =>
+        setTimeout(() => resolve('timeout'), SHUTDOWN_TIMEOUT_MS)
+      );
+      const result = await Promise.race([
+        waitForActiveTasks().then(() => 'done' as const),
+        timeoutPromise,
+      ]);
+      if (result === 'timeout') {
+        logger.warn(`Shutdown timeout: ${getActiveTaskCount()} tasks abandoned`);
+      }
     },
     isPaused: () => paused,
   };

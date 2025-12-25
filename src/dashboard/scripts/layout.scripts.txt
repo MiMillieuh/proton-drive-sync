@@ -1,0 +1,107 @@
+<script>
+  // Toast notification system
+  function showToast(message, type = 'success', duration = 3000) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+
+    const colors = {
+      success: 'bg-green-600 border-green-500',
+      error: 'bg-red-600 border-red-500',
+      info: 'bg-blue-600 border-blue-500',
+    };
+
+    const icons = {
+      success: 'check',
+      error: 'x',
+      info: 'info',
+    };
+
+    toast.className = `flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg text-white text-sm font-medium transform translate-x-full opacity-0 transition-all duration-300 ${colors[type] || colors.info}`;
+    toast.innerHTML = `
+      <i data-lucide="${icons[type] || icons.info}" class="w-5 h-5 shrink-0"></i>
+      <span>${message}</span>
+    `;
+    lucide.createIcons({ nodes: [toast] });
+
+    container.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+      toast.classList.remove('translate-x-full', 'opacity-0');
+    });
+
+    // Auto dismiss
+    setTimeout(() => {
+      toast.classList.add('translate-x-full', 'opacity-0');
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  // Store SSE EventSource reference for cleanup
+  let sseSource = null;
+
+  // Capture the EventSource when connection opens
+  document.body.addEventListener('htmx:sseOpen', (e) => {
+    sseSource = e.detail.source;
+  });
+
+  // Close SSE before navigating to prevent connection pile-up
+  document.querySelectorAll('a[href^="/"]').forEach((link) => {
+    link.addEventListener('click', () => {
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+    });
+  });
+
+  // Also close on page unload (e.g., refresh, external navigation)
+  window.addEventListener('beforeunload', () => {
+    if (sseSource) {
+      sseSource.close();
+      sseSource = null;
+    }
+  });
+
+  // Pulse the heartbeat dot on each heartbeat event
+  document.body.addEventListener('heartbeat-received', () => {
+    const ping = document.getElementById('heartbeat-ping');
+    if (ping) {
+      ping.classList.remove('opacity-0');
+      ping.classList.add('animate-ping', 'opacity-75');
+      setTimeout(() => {
+        ping.classList.remove('animate-ping', 'opacity-75');
+        ping.classList.add('opacity-0');
+      }, 500);
+    }
+  });
+
+  // Global spin manager - keeps .js-spin elements rotating smoothly across re-renders
+  (function () {
+    let rotation = 0;
+    let lastTime = performance.now();
+    const ROTATION_SPEED = 360; // degrees per second
+
+    function updateSpinners(currentTime) {
+      const deltaTime = (currentTime - lastTime) / 1000;
+      lastTime = currentTime;
+      rotation = (rotation + ROTATION_SPEED * deltaTime) % 360;
+
+      document.querySelectorAll('.js-spin').forEach((el) => {
+        el.style.transform = `rotate(${rotation}deg)`;
+      });
+
+      requestAnimationFrame(updateSpinners);
+    }
+
+    requestAnimationFrame(updateSpinners);
+  })();
+
+  // Initialize Lucide icons
+  lucide.createIcons();
+
+  // Reinitialize Lucide icons after HTMX swaps in new content
+  document.body.addEventListener('htmx:afterSwap', () => {
+    lucide.createIcons();
+  });
+</script>
