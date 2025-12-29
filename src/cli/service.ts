@@ -9,8 +9,6 @@ import * as readline from 'readline';
 import { sendSignal } from '../signals.js';
 import { setFlag, clearFlag, hasFlag, FLAGS } from '../flags.js';
 // @ts-expect-error Bun text imports
-import watchmanPlistTemplate from './templates/watchman.plist' with { type: 'text' };
-// @ts-expect-error Bun text imports
 import syncPlistTemplate from './templates/proton-drive-sync.plist' with { type: 'text' };
 
 function askYesNo(question: string): Promise<boolean> {
@@ -29,28 +27,13 @@ function askYesNo(question: string): Promise<boolean> {
 
 const PLIST_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
-const WATCHMAN_SERVICE_NAME = 'com.github.watchman';
-const WATCHMAN_PLIST_PATH = join(PLIST_DIR, `${WATCHMAN_SERVICE_NAME}.plist`);
-
 const SERVICE_NAME = 'com.damianb-bitflipper.proton-drive-sync';
 const PLIST_PATH = join(PLIST_DIR, `${SERVICE_NAME}.plist`);
-
-function getWatchmanPathSafe(): string | null {
-  const result = Bun.spawnSync(['which', 'watchman']);
-  if (result.exitCode !== 0) return null;
-  return new TextDecoder().decode(result.stdout).trim();
-}
 
 function getBinPathSafe(): string | null {
   const result = Bun.spawnSync(['which', 'proton-drive-sync']);
   if (result.exitCode !== 0) return null;
   return new TextDecoder().decode(result.stdout).trim();
-}
-
-function generateWatchmanPlist(watchmanPath: string): string {
-  return watchmanPlistTemplate
-    .replace('{{SERVICE_NAME}}', WATCHMAN_SERVICE_NAME)
-    .replace('{{WATCHMAN_PATH}}', watchmanPath);
 }
 
 function generateSyncPlist(binPath: string): string {
@@ -105,32 +88,6 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
     mkdirSync(PLIST_DIR, { recursive: true });
   }
 
-  let installedAny = false;
-
-  // Ask about watchman service (only in interactive mode)
-  if (interactive) {
-    const watchmanPath = getWatchmanPathSafe();
-    if (!watchmanPath) {
-      console.log('Watchman not found in PATH. Skipping watchman service.');
-      console.log('Install from: https://facebook.github.io/watchman/docs/install');
-    } else {
-      const installWatchman = await askYesNo('Install watchman service?');
-      if (installWatchman) {
-        console.log('Installing watchman service...');
-        if (existsSync(WATCHMAN_PLIST_PATH)) {
-          unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-        }
-        await Bun.write(WATCHMAN_PLIST_PATH, generateWatchmanPlist(watchmanPath));
-        console.log(`Created: ${WATCHMAN_PLIST_PATH}`);
-        loadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-        console.log('Watchman service installed and started.');
-        installedAny = true;
-      } else {
-        console.log('Skipping watchman service.');
-      }
-    }
-  }
-
   // Install proton-drive-sync service
   const installSync = interactive ? await askYesNo('Install proton-drive-sync service?') : true;
   if (installSync) {
@@ -144,13 +101,8 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
     loadSyncService();
     console.log('proton-drive-sync service installed and started.');
     console.log('View logs with: proton-drive-sync logs');
-    installedAny = true;
   } else {
     console.log('Skipping proton-drive-sync service.');
-  }
-
-  if (!installedAny) {
-    console.log('\nNo services were installed.');
   }
 }
 
@@ -160,23 +112,7 @@ export async function serviceUninstallCommand(): Promise<void> {
     process.exit(1);
   }
 
-  let uninstalledAny = false;
-
-  // Ask about watchman service
-  if (existsSync(WATCHMAN_PLIST_PATH)) {
-    const uninstallWatchman = await askYesNo('Uninstall watchman service?');
-    if (uninstallWatchman) {
-      console.log('Uninstalling watchman service...');
-      unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-      unlinkSync(WATCHMAN_PLIST_PATH);
-      console.log('Watchman service uninstalled.');
-      uninstalledAny = true;
-    } else {
-      console.log('Skipping watchman service.');
-    }
-  }
-
-  // Ask about proton-drive-sync service
+  // Uninstall proton-drive-sync service
   if (existsSync(PLIST_PATH)) {
     const uninstallSync = await askYesNo('Uninstall proton-drive-sync service?');
     if (uninstallSync) {
@@ -185,14 +121,11 @@ export async function serviceUninstallCommand(): Promise<void> {
       unlinkSync(PLIST_PATH);
       clearFlag(FLAGS.SERVICE_INSTALLED);
       console.log('proton-drive-sync service uninstalled.');
-      uninstalledAny = true;
     } else {
       console.log('Skipping proton-drive-sync service.');
     }
-  }
-
-  if (!uninstalledAny) {
-    console.log('\nNo services were uninstalled.');
+  } else {
+    console.log('No service is installed.');
   }
 }
 

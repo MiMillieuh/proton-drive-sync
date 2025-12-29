@@ -165,10 +165,9 @@ export async function startCommand(options: StartOptions): Promise<void> {
     process.exit(1);
   }
 
-  // Validate sync directories
+  // Warn if no sync directories configured
   if (!config.sync_dirs || config.sync_dirs.length === 0) {
-    logger.error('No sync directories configured. Add sync_dirs to your config file.');
-    process.exit(1);
+    logger.warn('No sync directories configured. Nothing will be synced.');
   }
 
   // Acquire run lock (prevents multiple instances)

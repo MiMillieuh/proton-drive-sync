@@ -5,7 +5,7 @@
  * Supports hot-reloading via namespaced signals (config:reload:<key>)
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { xdgConfig } from 'xdg-basedir';
 import { logger } from './logger.js';
@@ -68,16 +68,14 @@ let currentConfig: Config | null = null;
  */
 function parseConfig(exitOnError: boolean): Config | null {
   if (!existsSync(CONFIG_FILE)) {
-    const msg = `Config file not found: ${CONFIG_FILE}`;
-    if (exitOnError) {
-      console.error(msg);
-      console.error(
-        'Create it with: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "/backup"}]}'
-      );
-      process.exit(1);
-    }
-    logger.error(msg);
-    return null;
+    ensureConfigDir();
+    const defaultConfig: Config = {
+      sync_dirs: [],
+      sync_concurrency: DEFAULT_SYNC_CONCURRENCY,
+    };
+    writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+    logger.info(`Created default config file: ${CONFIG_FILE}`);
+    return defaultConfig;
   }
 
   try {
