@@ -90,8 +90,6 @@
   }
 
   async function saveConfig() {
-    const saveButton = document.getElementById('save-button');
-
     // Get valid directories (those with source_path)
     const validDirs = syncDirs.filter((d) => d.source_path.trim());
 
@@ -102,8 +100,6 @@
         remote_root: d.remote_root?.trim() || '',
       })),
     };
-
-    saveButton.disabled = true;
 
     try {
       const response = await fetch('/api/config', {
@@ -126,20 +122,15 @@
           const modalHtml = await modalResponse.text();
           document.body.insertAdjacentHTML('beforeend', modalHtml);
           lucide.createIcons();
-        } else if (redirectAfterSave) {
-          // During onboarding with dirs, redirect immediately
-          window.location.href = redirectAfterSave;
         } else {
-          // Normal save with dirs
-          showToast('Settings saved successfully!', 'success');
+          // Always show toast on successful save
+          showToast('Settings saved', 'success');
         }
       } else {
         showToast(result.error || 'Failed to save settings', 'error', 5000);
       }
     } catch (err) {
       showToast('Error saving settings', 'error', 5000);
-    } finally {
-      saveButton.disabled = false;
     }
   }
 

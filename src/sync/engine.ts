@@ -8,7 +8,7 @@ import { join, basename } from 'path';
 import { SyncEventType } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { registerSignalHandler } from '../signals.js';
-import { setFlag, clearFlag, isPaused, FLAGS } from '../flags.js';
+import { isPaused } from '../flags.js';
 import { sendStatusToDashboard } from '../dashboard/server.js';
 import { getConfig, onConfigChange } from '../config.js';
 import type { Config } from '../config.js';
@@ -192,7 +192,6 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
 
 interface ProcessorHandle {
   stop: () => Promise<void>;
-  isPaused: () => boolean;
 }
 
 /**
@@ -200,35 +199,12 @@ interface ProcessorHandle {
  */
 function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): ProcessorHandle {
   let running = true;
-  let paused = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  // Register pause/resume signal handlers
-  const handlePause = (): void => {
-    paused = true;
-    setFlag(FLAGS.PAUSED);
-    logger.info('Sync paused');
-    sendStatusToDashboard({ paused: true });
-  };
-
-  const handleResume = (): void => {
-    paused = false;
-    clearFlag(FLAGS.PAUSED);
-    logger.info('Sync resumed');
-    sendStatusToDashboard({ paused: false });
-  };
-
-  // Check if we were paused before restart (hot reload)
-  if (isPaused()) {
-    paused = true;
-    logger.info('Sync is paused (restored from previous state)');
-  }
-
-  registerSignalHandler('pause-sync', handlePause);
-  registerSignalHandler('resume-sync', handleResume);
 
   const processLoop = (): void => {
     if (!running) return;
+
+    const paused = isPaused();
 
     // Always send heartbeat (merged with job processing)
     sendStatusToDashboard({ paused });
@@ -264,6 +240,5 @@ function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): Proc
         logger.warn(`Shutdown timeout: ${getActiveTaskCount()} tasks abandoned`);
       }
     },
-    isPaused: () => paused,
   };
 }

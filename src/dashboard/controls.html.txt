@@ -49,6 +49,7 @@
             value="{{SYNC_CONCURRENCY}}"
             class="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-proton"
             oninput="document.getElementById('concurrency-value').textContent = this.value"
+            onchange="saveConfig()"
           />
           <span id="concurrency-value" class="w-8 text-center text-white font-mono">{{SYNC_CONCURRENCY}}</span>
         </div>
@@ -73,23 +74,20 @@
           {{SYNC_DIRS_HTML}}
         </div>
 
-        <div id="no-dirs-message" class="hidden text-center py-8 text-gray-500">
-          <i data-lucide="folder-x" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
+        <div id="no-dirs-message" class="hidden text-center py-2 text-gray-500">
           <p>No sync directories configured</p>
         </div>
       </div>
 
-      <!-- Save Button -->
-      <div class="flex justify-end gap-4">
-        <button
-          onclick="saveConfig()"
-          id="save-button"
-          class="flex items-center gap-1 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      <!-- Next Button (onboarding only) -->
+      <div class="flex justify-end gap-4 {{HIDE_NEXT_BUTTON}}">
+        <a
+          href="/about"
+          class="flex items-center gap-1 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
         >
-          {{SAVE_BUTTON_TEXT}}
-          <i data-lucide="check" class="w-4 h-4 {{HIDE_CHECK_ICON}}"></i>
-          <i data-lucide="arrow-right" class="w-4 h-4 {{HIDE_ARROW_ICON}}"></i>
-        </button>
+          Next
+          <i data-lucide="arrow-right" class="w-4 h-4"></i>
+        </a>
       </div>
     </div>
   </div>

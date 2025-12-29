@@ -7,7 +7,7 @@
 import { loadConfig, watchConfig } from '../config.js';
 import { logger, enableDebug, setDryRun } from '../logger.js';
 import { startSignalListener, stopSignalListener, registerSignalHandler } from '../signals.js';
-import { acquireRunLock, releaseRunLock, setFlag, FLAGS } from '../flags.js';
+import { acquireRunLock, releaseRunLock, setFlag, isPaused, FLAGS } from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
 import { startDashboard, stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
 import {
@@ -244,6 +244,13 @@ export async function startCommand(options: StartOptions): Promise<void> {
   const dryRun = options.dryRun ?? false;
   if (watchMode) {
     startDashboard(config, dryRun);
+
+    // Handle refresh-status signal for immediate dashboard updates (e.g., after pause toggle)
+    registerSignalHandler('refresh-status', () => {
+      const paused = isPaused();
+      logger.info(`Sync ${paused ? 'paused' : 'resumed'}`);
+      sendStatusToDashboard({ paused });
+    });
   }
 
   // Authenticate with Proton

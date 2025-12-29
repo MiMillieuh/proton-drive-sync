@@ -705,10 +705,7 @@ app.get('/controls', async (c) => {
   );
 
   // Replace button text/icons based on onboarding state
-  content = content
-    .replace('{{SAVE_BUTTON_TEXT}}', isOnboarding ? 'Next' : 'Save')
-    .replace('{{HIDE_CHECK_ICON}}', isOnboarding ? 'hidden' : '')
-    .replace('{{HIDE_ARROW_ICON}}', isOnboarding ? '' : 'hidden');
+  content = content.replace('{{HIDE_NEXT_BUTTON}}', isOnboarding ? '' : 'hidden');
 
   const html = await composePage(layout, content, {
     title: 'Controls - Proton Drive Sync',
@@ -815,11 +812,11 @@ app.post('/api/toggle-pause', (c) => {
   const isPaused = currentSyncStatus === 'paused';
   if (isPaused) {
     clearFlag(FLAGS.PAUSED);
-    sendSignal('resume-sync');
   } else {
     setFlag(FLAGS.PAUSED);
-    sendSignal('pause-sync');
   }
+  // Signal sync engine to refresh dashboard status immediately
+  sendSignal('refresh-status');
   // Return the new button state (optimistic UI update for button only)
   // The badge will update via the heartbeat path when the engine responds
   // Include both pause buttons with OOB swap for the controls page button
