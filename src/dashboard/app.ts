@@ -311,9 +311,11 @@ function renderStopSection(syncStatus: string): string {
       </div>
     </div>
     <button
-      onclick="stopService()"
+      hx-post="/api/signal/stop"
+      hx-swap="none"
+      hx-disabled-elt="this"
       id="stop-button"
-      class="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors"
+      class="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <i data-lucide="square" class="w-4 h-4"></i>
       Stop
@@ -790,7 +792,9 @@ app.get('/api/modal/no-sync-dirs', (c) => {
 /** Set onboarded flag */
 app.post('/api/onboard', (c) => {
   setFlag(FLAGS.ONBOARDING, ONBOARDING_STATE.COMPLETED);
-  return c.json({ success: true });
+  return c.html('', 200, {
+    'HX-Redirect': '/',
+  });
 });
 
 /** Complete onboarding controls step (sets state to ABOUT) */
@@ -881,7 +885,11 @@ app.post('/api/signal/:signal', (c) => {
       syncStatus: 'disconnected',
     });
     sendSignal('stop');
-    return c.text('OK');
+    return c.html('', 200, {
+      'HX-Trigger': JSON.stringify({
+        showToast: { message: 'Service stopping...', type: 'info', duration: 3000 },
+      }),
+    });
   }
 
   return c.text('Unknown signal', 400);
@@ -1005,12 +1013,13 @@ app.post('/api/add-directory', async (c) => {
     // Signal config reload
     sendSignal(CONFIG_CHECK_SIGNAL);
 
-    // Return updated list HTML + trigger events to close modal and sync JS state
+    // Return updated list HTML + trigger events to close modal, sync JS state, and show toast
     const html = renderSyncDirsHtml(newConfig.sync_dirs);
     return c.html(html, 200, {
       'HX-Trigger': JSON.stringify({
         'dir-added': { dirs: newConfig.sync_dirs },
         'close-modal': true,
+        showToast: { message: 'Config updated', type: 'success' },
       }),
     });
   } catch (err) {

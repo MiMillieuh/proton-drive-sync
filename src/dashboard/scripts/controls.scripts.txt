@@ -69,10 +69,18 @@
     lucide.createIcons();
   }
 
-  function removeSyncDir(index) {
+  async function removeSyncDir(index) {
     syncDirs.splice(index, 1);
     renderSyncDirs();
-    saveConfig();
+    await saveConfig();
+
+    // Show warning modal only when last directory was removed
+    if (syncDirs.length === 0) {
+      const modalResponse = await fetch('/api/modal/no-sync-dirs?redirect=' + encodeURIComponent(redirectAfterSave || ''));
+      const modalHtml = await modalResponse.text();
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+      lucide.createIcons();
+    }
   }
 
   function updateSyncDir(index, field, value) {
@@ -117,16 +125,7 @@
         syncDirs = config.sync_dirs.length > 0 ? config.sync_dirs : [];
         renderSyncDirs();
 
-        if (validDirs.length === 0) {
-          // Show warning modal for 0 dirs
-          const modalResponse = await fetch('/api/modal/no-sync-dirs?redirect=' + encodeURIComponent(redirectAfterSave || ''));
-          const modalHtml = await modalResponse.text();
-          document.body.insertAdjacentHTML('beforeend', modalHtml);
-          lucide.createIcons();
-        } else {
-          // Always show toast on successful save
-          showToast('Settings saved', 'success');
-        }
+        showToast('Config updated', 'success');
       } else {
         showToast(result.error || 'Failed to save settings', 'error', 5000);
       }
@@ -139,24 +138,6 @@
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-  }
-
-  async function stopService() {
-    const button = document.getElementById('stop-button');
-    button.disabled = true;
-
-    try {
-      const response = await fetch('/api/signal/stop', { method: 'POST' });
-      if (response.ok) {
-        showToast('Service stopping...', 'info');
-      } else {
-        showToast('Failed to stop service', 'error', 5000);
-        button.disabled = false;
-      }
-    } catch (err) {
-      showToast('Error stopping service', 'error', 5000);
-      button.disabled = false;
-    }
   }
 
   // Listen for dir-added event from HTMX to sync JS state
@@ -174,12 +155,6 @@
   document.body.addEventListener('close-modal', function () {
     const modal = document.getElementById('add-dir-modal');
     if (modal) modal.remove();
-  });
-
-  // Listen for showToast event from HTMX (for validation errors)
-  document.body.addEventListener('showToast', function (e) {
-    const { message, type } = e.detail;
-    showToast(message, type || 'error', 3000);
   });
 
   // Re-initialize Lucide icons after any htmx swap

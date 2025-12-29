@@ -10,7 +10,15 @@ export const AddDirectoryModal: FC = () => {
       <div class="relative bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-lg shadow-xl">
         <h3 class="text-lg font-semibold text-white mb-4">Add Sync Directory</h3>
 
-        <form hx-post="/api/add-directory" hx-target="#sync-dirs-list" hx-swap="innerHTML">
+        <form
+          hx-post="/api/add-directory"
+          hx-target="#sync-dirs-list"
+          hx-swap="innerHTML"
+          {...{
+            'hx-on::after-request':
+              "if(event.detail.successful) showToast('Config updated', 'success')",
+          }}
+        >
           {/* Local Path */}
           <div class="mb-4">
             <label class="block text-xs text-gray-500 mb-1">Local Path</label>

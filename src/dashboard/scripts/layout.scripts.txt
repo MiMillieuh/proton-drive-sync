@@ -105,4 +105,9 @@
   document.body.addEventListener('htmx:afterSwap', () => {
     lucide.createIcons();
   });
+
+  // Listen for showToast events triggered by HX-Trigger headers
+  document.body.addEventListener('showToast', (e) => {
+    showToast(e.detail.message, e.detail.type, e.detail.duration || 3000);
+  });
 </script>

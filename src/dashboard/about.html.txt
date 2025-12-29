@@ -70,18 +70,16 @@
 
     <!-- Start Using Link (only shown during onboarding) -->
     <div id="start-using-container" class="{{HIDE_START_BUTTON}} mt-2 mb-4">
-      <a
-        href="#"
-        onclick="
-          startUsing();
-          return false;
-        "
+      <button
+        hx-post="/api/onboard"
+        hx-swap="none"
+        hx-disabled-elt="this"
         id="start-using-button"
-        class="flex items-center bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium transition-colors px-4 py-2 rounded-full"
+        class="flex items-center bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium transition-colors px-4 py-2 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Start using
         <i data-lucide="rocket" class="w-4 h-4 ml-1"></i>
-      </a>
+      </button>
     </div>
 
     <!-- Version -->
