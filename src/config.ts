@@ -94,16 +94,6 @@ function parseConfig(exitOnError: boolean): Config | null {
       return null;
     }
 
-    if (config.sync_dirs.length === 0) {
-      const msg = 'Config "sync_dirs" array is empty';
-      if (exitOnError) {
-        console.error(msg);
-        process.exit(1);
-      }
-      logger.error(msg);
-      return null;
-    }
-
     // Default sync_concurrency if not set
     if (config.sync_concurrency === undefined) {
       config.sync_concurrency = DEFAULT_SYNC_CONCURRENCY;
