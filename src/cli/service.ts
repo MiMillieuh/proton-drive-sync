@@ -8,6 +8,7 @@ import { homedir } from 'os';
 import * as readline from 'readline';
 import { sendSignal } from '../signals.js';
 import { setFlag, clearFlag, hasFlag, FLAGS } from '../flags.js';
+import { logger } from '../logger.js';
 // @ts-expect-error Bun text imports
 import syncPlistTemplate from './templates/proton-drive-sync.plist' with { type: 'text' };
 
@@ -65,7 +66,7 @@ function unloadService(name: string, plistPath: string): void {
 export async function serviceInstallCommand(interactive: boolean = true): Promise<void> {
   if (process.platform !== 'darwin') {
     if (interactive) {
-      console.error('Error: Service installation is only supported on macOS.');
+      logger.error('Service installation is only supported on macOS.');
       process.exit(1);
     }
     return;
@@ -74,8 +75,8 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
   const binPath = getBinPathSafe();
   if (!binPath) {
     if (interactive) {
-      console.error('Error: proton-drive-sync not found in PATH.');
-      console.error(
+      logger.error('proton-drive-sync not found in PATH.');
+      logger.error(
         'Install with: curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh | bash'
       );
       process.exit(1);
@@ -91,25 +92,25 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
   // Install proton-drive-sync service
   const installSync = interactive ? await askYesNo('Install proton-drive-sync service?') : true;
   if (installSync) {
-    console.log('Installing proton-drive-sync service...');
+    logger.info('Installing proton-drive-sync service...');
     if (existsSync(PLIST_PATH)) {
       unloadService(SERVICE_NAME, PLIST_PATH);
     }
     await Bun.write(PLIST_PATH, generateSyncPlist(binPath));
-    console.log(`Created: ${PLIST_PATH}`);
+    logger.info(`Created: ${PLIST_PATH}`);
     setFlag(FLAGS.SERVICE_INSTALLED);
     loadSyncService();
-    console.log('proton-drive-sync service installed and started.');
-    console.log('View logs with: proton-drive-sync logs');
+    logger.info('proton-drive-sync service installed and started.');
+    logger.info('View logs with: proton-drive-sync logs');
   } else {
-    console.log('Skipping proton-drive-sync service.');
+    logger.info('Skipping proton-drive-sync service.');
   }
 }
 
 export async function serviceUninstallCommand(interactive: boolean = true): Promise<void> {
   if (process.platform !== 'darwin') {
     if (interactive) {
-      console.error('Error: Service uninstallation is only supported on macOS.');
+      logger.error('Service uninstallation is only supported on macOS.');
       process.exit(1);
     }
     return;
@@ -121,16 +122,16 @@ export async function serviceUninstallCommand(interactive: boolean = true): Prom
       ? await askYesNo('Uninstall proton-drive-sync service?')
       : true;
     if (uninstallSync) {
-      console.log('Uninstalling proton-drive-sync service...');
+      logger.info('Uninstalling proton-drive-sync service...');
       unloadSyncService();
       unlinkSync(PLIST_PATH);
       clearFlag(FLAGS.SERVICE_INSTALLED);
-      console.log('proton-drive-sync service uninstalled.');
+      logger.info('proton-drive-sync service uninstalled.');
     } else {
-      console.log('Skipping proton-drive-sync service.');
+      logger.info('Skipping proton-drive-sync service.');
     }
   } else if (interactive) {
-    console.log('No service is installed.');
+    logger.info('No service is installed.');
   }
 }
 
@@ -157,7 +158,7 @@ export function loadSyncService(): boolean {
   try {
     loadService(SERVICE_NAME, PLIST_PATH);
     setFlag(FLAGS.SERVICE_LOADED);
-    console.info('Service loaded: will start on login');
+    logger.info('Service loaded: will start on login');
     return true;
   } catch {
     return false;
@@ -178,36 +179,36 @@ export function unloadSyncService(): boolean {
   }
 
   clearFlag(FLAGS.SERVICE_LOADED);
-  console.info('Service unloaded: will not start on login');
+  logger.info('Service unloaded: will not start on login');
   return true;
 }
 
 export function serviceUnloadCommand(): void {
   if (process.platform !== 'darwin') {
-    console.error('Error: Service stop is only supported on macOS.');
+    logger.error('Service stop is only supported on macOS.');
     process.exit(1);
   }
 
   unloadSyncService();
   sendSignal('stop');
-  console.log('Service stopped and unloaded. Run `proton-drive-sync service start` to restart.');
+  logger.info('Service stopped and unloaded. Run `proton-drive-sync service start` to restart.');
 }
 
 export function serviceLoadCommand(): void {
   if (process.platform !== 'darwin') {
-    console.error('Error: Service start is only supported on macOS.');
+    logger.error('Service start is only supported on macOS.');
     process.exit(1);
   }
 
   if (!existsSync(PLIST_PATH)) {
-    console.error('Service is not installed. Run `proton-drive-sync service install` first.');
+    logger.error('Service is not installed. Run `proton-drive-sync service install` first.');
     process.exit(1);
   }
 
   if (loadSyncService()) {
-    console.log('Service started.');
+    logger.info('Service started.');
   } else {
-    console.error('Failed to start service.');
+    logger.error('Failed to start service.');
     process.exit(1);
   }
 }

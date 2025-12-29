@@ -5,6 +5,7 @@
 import { confirm } from '@inquirer/prompts';
 import { gt } from 'drizzle-orm';
 import { db, schema, run } from '../db/index.js';
+import { logger } from '../logger.js';
 
 export async function resetCommand(options: {
   yes: boolean;
@@ -31,7 +32,7 @@ export async function resetCommand(options: {
     });
 
     if (!confirmed) {
-      console.log('Aborted.');
+      logger.info('Aborted.');
       return;
     }
   }
@@ -40,15 +41,15 @@ export async function resetCommand(options: {
     const result = run(
       db.update(schema.syncJobs).set({ retryAt: new Date() }).where(gt(schema.syncJobs.nRetries, 0))
     );
-    console.log(`Cleared retry delay for ${result.changes} job(s).`);
+    logger.info(`Cleared retry delay for ${result.changes} job(s).`);
   } else if (signalsOnly) {
     db.delete(schema.signals).run();
-    console.log('Signals cleared.');
+    logger.info('Signals cleared.');
   } else {
     // Clear all sync-related tables
     db.delete(schema.clocks).run();
     db.delete(schema.syncJobs).run();
     db.delete(schema.processingQueue).run();
-    console.log('State reset.');
+    logger.info('State reset.');
   }
 }

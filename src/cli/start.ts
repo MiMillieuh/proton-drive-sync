@@ -10,6 +10,12 @@ import { startSignalListener, stopSignalListener, registerSignalHandler } from '
 import { acquireRunLock, releaseRunLock, setFlag, FLAGS } from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
 import { startDashboard, stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
+import {
+  isServiceInstalled,
+  loadSyncService,
+  unloadSyncService,
+  serviceInstallCommand,
+} from './service.js';
 import { startDashboardMode } from '../dashboard/app.js';
 import { runOneShotSync, runWatchMode, closeWatchman, shutdownWatchman } from '../sync/index.js';
 
@@ -112,7 +118,7 @@ function spawnDaemon(options: StartOptions): void {
   // Unref so parent can exit without waiting for child
   child.unref();
 
-  console.log(`Started daemon process (PID: ${child.pid})`);
+  logger.info(`Started daemon process (PID: ${child.pid})`);
   process.exit(0);
 }
 
@@ -132,13 +138,13 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
   // Validate: --no-watch requires --no-daemon
   if (options.watch === false && options.daemon !== false) {
-    console.error('Error: --no-watch requires --no-daemon');
+    logger.error('Error: --no-watch requires --no-daemon');
     process.exit(1);
   }
 
   // Validate: --paused requires watch mode
   if (options.paused && options.watch === false) {
-    console.error('Error: --paused requires watch mode');
+    logger.error('Error: --paused requires watch mode');
     process.exit(1);
   }
 
@@ -217,6 +223,21 @@ export async function startCommand(options: StartOptions): Promise<void> {
     logger.info('Stop signal received');
     sendStatusToDashboard({ disconnected: true });
     cleanup().then(() => process.exit(0));
+  });
+
+  // Handle start-on-login enable signal
+  registerSignalHandler('start-on-login-enable', async () => {
+    const isInstalled = isServiceInstalled();
+    if (!isInstalled) {
+      await serviceInstallCommand(false);
+    } else {
+      loadSyncService();
+    }
+  });
+
+  // Handle start-on-login disable signal
+  registerSignalHandler('start-on-login-disable', () => {
+    unloadSyncService();
   });
 
   // Start dashboard early (before auth) so user can see auth status

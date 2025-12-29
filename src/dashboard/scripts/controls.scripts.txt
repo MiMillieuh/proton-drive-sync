@@ -1,57 +1,12 @@
 <script>
   let syncDirs = {{SYNC_DIRS_JSON}};
   let originalConfig = { sync_concurrency: {{SYNC_CONCURRENCY}}, sync_dirs: syncDirs };
-  let serviceEnabled = {{SERVICE_ENABLED}};
   const redirectAfterSave = '{{REDIRECT_AFTER_SAVE}}';
 
-  async function loadServiceStatus() {
-    try {
-      const response = await fetch('/api/service-status');
-      const data = await response.json();
-      serviceEnabled = data.enabled;
-      updateToggleUI();
-    } catch (err) {
-      console.error('Failed to load service status:', err);
-    }
-  }
-
-  function updateToggleUI() {
-    const toggle = document.getElementById('start-on-login-toggle');
-    const knob = document.getElementById('start-on-login-knob');
-
-    if (serviceEnabled) {
-      toggle.classList.remove('bg-gray-600');
-      toggle.classList.add('bg-proton');
-      toggle.setAttribute('aria-checked', 'true');
-      knob.classList.remove('translate-x-1');
-      knob.classList.add('translate-x-6');
-    } else {
-      toggle.classList.remove('bg-proton');
-      toggle.classList.add('bg-gray-600');
-      toggle.setAttribute('aria-checked', 'false');
-      knob.classList.remove('translate-x-6');
-      knob.classList.add('translate-x-1');
-    }
-  }
-
-  async function toggleStartOnLogin() {
-    const toggle = document.getElementById('start-on-login-toggle');
-    toggle.disabled = true;
-
-    try {
-      const response = await fetch('/api/toggle-service', { method: 'POST' });
-      const data = await response.json();
-
-      if (data.success) {
-        serviceEnabled = data.enabled;
-        updateToggleUI();
-      }
-    } catch (err) {
-      console.error('Failed to toggle service:', err);
-    } finally {
-      toggle.disabled = false;
-    }
-  }
+  // Re-initialize Lucide icons after HTMX swaps
+  document.body.addEventListener('htmx:afterSwap', function() {
+    lucide.createIcons();
+  });
 
   function renderSyncDirs() {
     const container = document.getElementById('sync-dirs-list');
@@ -240,6 +195,64 @@
     lucide.createIcons();
   });
 
-  // Load service status on page load (for toggle sync)
-  loadServiceStatus();
+  // Toggle service with smooth animation before server swap
+  async function toggleService(button) {
+    const section = document.getElementById('start-on-login-section');
+    const knob = button.querySelector('span');
+    const isCurrentlyEnabled = button.getAttribute('aria-checked') === 'true';
+
+    // Optimistically toggle the UI immediately for smooth animation
+    if (isCurrentlyEnabled) {
+      // Turning OFF: proton -> gray, knob moves left
+      button.classList.remove('bg-proton');
+      button.classList.add('bg-gray-600');
+      knob.classList.remove('translate-x-6');
+      knob.classList.add('translate-x-1');
+      button.setAttribute('aria-checked', 'false');
+    } else {
+      // Turning ON: gray -> proton, knob moves right
+      button.classList.remove('bg-gray-600');
+      button.classList.add('bg-proton');
+      knob.classList.remove('translate-x-1');
+      knob.classList.add('translate-x-6');
+      button.setAttribute('aria-checked', 'true');
+    }
+
+    // Wait for animation to complete (matches transition-transform duration)
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Now perform the server request and swap
+    try {
+      const response = await fetch('/api/toggle-service', { method: 'POST' });
+      if (response.ok) {
+        const html = await response.text();
+        section.outerHTML = html;
+        lucide.createIcons();
+      } else {
+        // Revert on error
+        revertToggle(button, knob, isCurrentlyEnabled);
+        showToast('Failed to toggle service', 'error', 3000);
+      }
+    } catch (err) {
+      // Revert on error
+      revertToggle(button, knob, isCurrentlyEnabled);
+      showToast('Error toggling service', 'error', 3000);
+    }
+  }
+
+  function revertToggle(button, knob, wasEnabled) {
+    if (wasEnabled) {
+      button.classList.add('bg-proton');
+      button.classList.remove('bg-gray-600');
+      knob.classList.add('translate-x-6');
+      knob.classList.remove('translate-x-1');
+      button.setAttribute('aria-checked', 'true');
+    } else {
+      button.classList.add('bg-gray-600');
+      button.classList.remove('bg-proton');
+      knob.classList.add('translate-x-1');
+      knob.classList.remove('translate-x-6');
+      button.setAttribute('aria-checked', 'false');
+    }
+  }
 </script>

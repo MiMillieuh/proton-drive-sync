@@ -5,9 +5,10 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { xdgState } from 'xdg-basedir';
+import { logger } from '../logger.js';
 
 if (!xdgState) {
-  console.error('Could not determine XDG state directory');
+  logger.error('Could not determine XDG state directory');
   process.exit(1);
 }
 
@@ -20,8 +21,8 @@ interface LogsOptions {
 
 export function logsCommand(options: LogsOptions): void {
   if (!existsSync(LOG_PATH)) {
-    console.error(`Log file not found: ${LOG_PATH}`);
-    console.error('The service may not have run yet.');
+    logger.error(`Log file not found: ${LOG_PATH}`);
+    logger.error('The service may not have run yet.');
     process.exit(1);
   }
 
@@ -32,7 +33,7 @@ export function logsCommand(options: LogsOptions): void {
     });
 
     tail.exited.catch((err: Error) => {
-      console.error('Failed to follow logs:', err.message);
+      logger.error('Failed to follow logs:', err.message);
       process.exit(1);
     });
 
@@ -45,21 +46,21 @@ export function logsCommand(options: LogsOptions): void {
     const content = readFileSync(LOG_PATH, 'utf-8');
 
     if (!content.trim()) {
-      console.log('Log file is empty.');
+      logger.info('Log file is empty.');
       return;
     }
 
     // Print the logs
-    console.log(content);
+    logger.info(content);
   }
 }
 
 export function logsClearCommand(): void {
   if (!existsSync(LOG_PATH)) {
-    console.log('No log file to clear.');
+    logger.info('No log file to clear.');
     return;
   }
 
   unlinkSync(LOG_PATH);
-  console.log('Logs cleared.');
+  logger.info('Logs cleared.');
 }

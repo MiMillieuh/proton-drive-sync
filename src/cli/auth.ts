@@ -14,6 +14,7 @@ import {
 import { storeCredentials, deleteStoredCredentials } from '../keychain.js';
 import type { StoredCredentials } from '../keychain.js';
 import type { ProtonDriveClient, ApiError } from '../proton/types.js';
+import { logger } from '../logger.js';
 
 // Re-export for use in start.ts
 export { getStoredCredentials } from '../keychain.js';
@@ -136,11 +137,11 @@ export async function authCommand(): Promise<void> {
   const pwd = await password({ message: 'Password:' });
 
   if (!username || !pwd) {
-    console.error('Username and password are required.');
+    logger.error('Username and password are required.');
     process.exit(1);
   }
 
-  console.log('\nAuthenticating with Proton...');
+  logger.info('\nAuthenticating with Proton...');
 
   // Authenticate and get tokens
   try {
@@ -149,9 +150,9 @@ export async function authCommand(): Promise<void> {
     // Save tokens and username to keychain
     await deleteStoredCredentials();
     await storeCredentials(credentials);
-    console.log('Credentials saved to Keychain.');
+    logger.info('Credentials saved to Keychain.');
   } catch (error) {
-    console.error('Authentication failed:', (error as Error).message);
+    logger.error('Authentication failed:', (error as Error).message);
     process.exit(1);
   }
 }

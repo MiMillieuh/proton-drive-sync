@@ -11,6 +11,7 @@ import { Database } from 'bun:sqlite';
 import type { Changes } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema.js';
+import { logger } from '../logger.js';
 
 // Import migrations as text (embedded at compile time)
 // When adding new migrations, add a new import and entry to the migrations array below
@@ -35,7 +36,7 @@ const migrations = [
 // ============================================================================
 
 if (!xdgState) {
-  console.error('Could not determine XDG state directory');
+  logger.error('Could not determine XDG state directory');
   process.exit(1);
 }
 

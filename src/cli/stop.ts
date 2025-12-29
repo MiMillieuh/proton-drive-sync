@@ -6,6 +6,7 @@
 
 import { sendSignal } from '../signals.js';
 import { isAlreadyRunning } from '../flags.js';
+import { logger } from '../logger.js';
 
 /**
  * Stop the sync process gracefully by sending a stop signal.
@@ -15,13 +16,13 @@ import { isAlreadyRunning } from '../flags.js';
 export function stopCommand(): void {
   // Check if a sync process is running first
   if (!isAlreadyRunning()) {
-    console.log('No running proton-drive-sync process found.');
+    logger.info('No running proton-drive-sync process found.');
     return;
   }
 
   // Send stop signal to the process
   sendSignal('stop');
-  console.log('Stop signal sent. Waiting for process to exit...');
+  logger.info('Stop signal sent. Waiting for process to exit...');
 
   // Wait for up to 15 seconds for the process to exit (running signal disappears)
   const startTime = Date.now();
@@ -30,14 +31,14 @@ export function stopCommand(): void {
 
   const waitForExit = (): void => {
     if (!isAlreadyRunning()) {
-      console.log('proton-drive-sync stopped.');
+      logger.info('proton-drive-sync stopped.');
       return;
     }
 
     if (Date.now() - startTime < timeout) {
       setTimeout(waitForExit, checkInterval);
     } else {
-      console.log('Process did not respond to stop signal.');
+      logger.info('Process did not respond to stop signal.');
     }
   };
 

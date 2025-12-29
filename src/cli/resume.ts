@@ -6,6 +6,7 @@
 
 import { sendSignal } from '../signals.js';
 import { isAlreadyRunning, isPaused } from '../flags.js';
+import { logger } from '../logger.js';
 
 /**
  * Resume the sync process by sending a resume signal.
@@ -14,19 +15,19 @@ import { isAlreadyRunning, isPaused } from '../flags.js';
 export function resumeCommand(): void {
   // Check if a sync process is running first
   if (!isAlreadyRunning()) {
-    console.log('No running proton-drive-sync process found.');
+    logger.info('No running proton-drive-sync process found.');
     return;
   }
 
   // Check if actually paused
   if (!isPaused()) {
-    console.log('Sync is not paused.');
+    logger.info('Sync is not paused.');
     return;
   }
 
   // Send resume signal to the process
   sendSignal('resume-sync');
-  console.log('Resume signal sent. Waiting for confirmation...');
+  logger.info('Resume signal sent. Waiting for confirmation...');
 
   // Wait for up to 5 seconds for the paused flag to be cleared
   const startTime = Date.now();
@@ -36,14 +37,14 @@ export function resumeCommand(): void {
   const waitForAck = (): void => {
     // Flag cleared = process acknowledged
     if (!isPaused()) {
-      console.log('Syncing resumed.');
+      logger.info('Syncing resumed.');
       return;
     }
 
     if (Date.now() - startTime < timeout) {
       setTimeout(waitForAck, checkInterval);
     } else {
-      console.log('Process did not respond to resume signal.');
+      logger.info('Process did not respond to resume signal.');
     }
   };
 

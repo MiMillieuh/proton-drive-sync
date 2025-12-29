@@ -28,12 +28,6 @@ import { sendSignal } from '../signals.js';
 import { logger, enableIpcLogging } from '../logger.js';
 import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
 import {
-  isServiceInstalled,
-  loadSyncService,
-  unloadSyncService,
-  serviceInstallCommand,
-} from '../cli/service.js';
-import {
   type AuthStatusUpdate,
   type DashboardJob,
   type DashboardStatus,
@@ -56,6 +50,7 @@ import { PauseButton } from './views/fragments/PauseButton.js';
 import { ControlsPauseButton } from './views/fragments/ControlsPauseButton.js';
 import { AddDirectoryModal } from './views/fragments/AddDirectoryModal.js';
 import { NoSyncDirsModal } from './views/fragments/NoSyncDirsModal.js';
+import { StartOnLoginSection } from './views/fragments/StartOnLoginSection.js';
 
 // Embed HTML templates at compile time as text (required for compiled binaries)
 import layoutHtml from './layout.html.txt';
@@ -585,15 +580,13 @@ let isDryRun = false;
 function controlsScriptsWithValues(
   isOnboarding: boolean,
   syncDirs: Array<{ source_path: string; remote_root?: string }>,
-  syncConcurrency: number,
-  serviceEnabled: boolean
+  syncConcurrency: number
 ): string {
   const redirectUrl = isOnboarding ? '/about' : '';
   return controlsScriptsHtml
     .replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl)
     .replace('{{SYNC_DIRS_JSON}}', JSON.stringify(syncDirs))
-    .replace('{{SYNC_CONCURRENCY}}', String(syncConcurrency))
-    .replace('{{SERVICE_ENABLED}}', serviceEnabled ? 'true' : 'false');
+    .replace('{{SYNC_CONCURRENCY}}', String(syncConcurrency));
 }
 
 /**
@@ -688,12 +681,12 @@ app.get('/controls', async (c) => {
     .replace('{{STOP_SECTION_CONTENT}}', renderFragment(FRAG.stopSection, s))
     .replace('{{CONTROLS_PAUSE_CONTENT}}', renderFragment(FRAG.controlsPauseButton, s));
 
-  // Server-side render start-on-login toggle state
+  // Server-side render start-on-login section
   const serviceEnabled = hasFlag(FLAGS.SERVICE_LOADED);
-  content = content
-    .replace('{{TOGGLE_BG_CLASS}}', serviceEnabled ? 'bg-proton' : 'bg-gray-600')
-    .replace('{{TOGGLE_ARIA_CHECKED}}', serviceEnabled ? 'true' : 'false')
-    .replace('{{TOGGLE_KNOB_CLASS}}', serviceEnabled ? 'translate-x-6' : 'translate-x-1');
+  content = content.replace(
+    '{{START_ON_LOGIN_SECTION}}',
+    StartOnLoginSection({ enabled: serviceEnabled })!.toString()
+  );
 
   // Server-side render sync concurrency and directories
   const syncConcurrency = currentConfig?.sync_concurrency ?? 8;
@@ -720,7 +713,7 @@ app.get('/controls', async (c) => {
   const html = await composePage(layout, content, {
     title: 'Controls - Proton Drive Sync',
     activeTab: 'controls',
-    pageScripts: controlsScriptsWithValues(isOnboarding, syncDirs, syncConcurrency, serviceEnabled),
+    pageScripts: controlsScriptsWithValues(isOnboarding, syncDirs, syncConcurrency),
   });
   return c.html(html);
 });
@@ -803,32 +796,18 @@ app.post('/api/onboard', (c) => {
   return c.json({ success: true });
 });
 
-/** Get service start-on-login status */
-app.get('/api/service-status', (c) => {
-  const installed = isServiceInstalled();
-  const enabled = hasFlag(FLAGS.SERVICE_LOADED);
-  return c.json({ installed, enabled });
-});
-
 /** Toggle service start-on-login */
-app.post('/api/toggle-service', async (c) => {
-  const isInstalled = isServiceInstalled();
+app.post('/api/toggle-service', (c) => {
   const isEnabled = hasFlag(FLAGS.SERVICE_LOADED);
 
   if (isEnabled) {
-    // Disable: just unload, don't uninstall
-    unloadSyncService();
-    return c.json({ success: true, enabled: false });
+    sendSignal('start-on-login-disable');
   } else {
-    // Enable: install if needed, then load
-    if (!isInstalled) {
-      const success = await serviceInstallCommand(false);
-      return c.json({ success, enabled: success });
-    } else {
-      const success = loadSyncService();
-      return c.json({ success, enabled: success });
-    }
+    sendSignal('start-on-login-enable');
   }
+
+  // Optimistic UI update - return the expected new state
+  return c.html(StartOnLoginSection({ enabled: !isEnabled })!.toString());
 });
 
 /** Toggle pause state */

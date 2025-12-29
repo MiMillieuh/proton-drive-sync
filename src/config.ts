@@ -42,7 +42,7 @@ export const CONFIG_CHECK_SIGNAL = 'config:check';
 export const DEFAULT_SYNC_CONCURRENCY = 8;
 
 if (!xdgConfig) {
-  console.error('Could not determine XDG config directory');
+  logger.error('Could not determine XDG config directory');
   process.exit(1);
 }
 
@@ -85,7 +85,7 @@ function parseConfig(exitOnError: boolean): Config | null {
     if (!config.sync_dirs || !Array.isArray(config.sync_dirs)) {
       const msg = 'Config must have a "sync_dirs" array';
       if (exitOnError) {
-        console.error(msg);
+        logger.error(msg);
         process.exit(1);
       }
       logger.error(msg);
@@ -103,8 +103,8 @@ function parseConfig(exitOnError: boolean): Config | null {
         const msg =
           'Config sync_dirs must be objects with "source_path" and "remote_root" properties';
         if (exitOnError) {
-          console.error(msg);
-          console.error(
+          logger.error(msg);
+          logger.error(
             'Example: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "/backup"}]}'
           );
           process.exit(1);

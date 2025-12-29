@@ -15,6 +15,7 @@
 
 import * as openpgp from 'openpgp';
 import bcrypt from 'bcryptjs';
+import { logger } from './logger.js';
 
 // ============================================================================
 // Types
@@ -676,7 +677,7 @@ export class ProtonAuth {
       const apiError = error as ApiError;
       // Handle expired access token (401) - try to refresh and retry
       if (apiError.status === 401 && this.session?.RefreshToken) {
-        console.log('[AUTH] Access token expired, attempting refresh...');
+        logger.info('Access token expired, attempting refresh...');
         await this.refreshToken();
         // Retry with new token
         return await apiRequest<T>(method, endpoint, data, this.session);
@@ -850,7 +851,7 @@ export class ProtonAuth {
           });
           this.session.primaryKey = decryptedKey;
         } catch (error) {
-          console.warn('Failed to decrypt primary key:', (error as Error).message);
+          logger.warn('Failed to decrypt primary key:', (error as Error).message);
         }
       }
     }
@@ -898,7 +899,7 @@ export class ProtonAuth {
             });
           }
         } catch (error) {
-          console.warn(`Failed to process address key ${key.ID}:`, (error as Error).message);
+          logger.warn(`Failed to process address key ${key.ID}:`, (error as Error).message);
         }
       }
 
@@ -963,7 +964,7 @@ export class ProtonAuth {
           });
           this.session.primaryKey = decryptedKey;
         } catch (error) {
-          console.warn('Failed to decrypt primary user key:', (error as Error).message);
+          logger.warn('Failed to decrypt primary user key:', (error as Error).message);
         }
       }
 
@@ -1010,7 +1011,7 @@ export class ProtonAuth {
               });
             }
           } catch (error) {
-            console.warn(`Failed to process key ${key.ID}:`, (error as Error).message);
+            logger.warn(`Failed to process key ${key.ID}:`, (error as Error).message);
           }
         }
 
