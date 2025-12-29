@@ -111,6 +111,12 @@ async function initializeDatabase() {
 
   const sqlite = new Database(DB_PATH);
 
+  // Configure SQLite for concurrent access (multiple processes may access the database)
+  // WAL mode allows concurrent reads during writes and reduces lock contention
+  sqlite.exec('PRAGMA journal_mode = WAL');
+  // Busy timeout (5s) makes SQLite retry on lock instead of failing immediately
+  sqlite.exec('PRAGMA busy_timeout = 5000');
+
   // Run embedded migrations
   await runMigrations(sqlite);
 
