@@ -446,11 +446,6 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;');
 }
 
-/** Render add directory error message HTML */
-function renderAddDirError(message: string): string {
-  return `<div id="add-dir-error" class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">${escapeHtml(message)}</div>`;
-}
-
 /** Render sync directories HTML for SSR */
 function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
   return dirs
@@ -944,27 +939,38 @@ app.post('/api/add-directory', async (c) => {
 
     // Validate source_path is provided
     if (!sourcePath) {
-      return c.html(renderAddDirError('Local path is required'), 400, {
-        'HX-Retarget': '#add-dir-error',
-        'HX-Reswap': 'outerHTML',
+      return c.html('', 400, {
+        'HX-Reswap': 'none',
+        'HX-Trigger': JSON.stringify({
+          showToast: { message: 'Local path is required', type: 'error' },
+        }),
       });
     }
 
     // Validate remote_root starts with /
     if (remoteRoot && !remoteRoot.startsWith('/')) {
-      return c.html(renderAddDirError('Remote root must start with /'), 400, {
-        'HX-Retarget': '#add-dir-error',
-        'HX-Reswap': 'outerHTML',
+      return c.html('', 400, {
+        'HX-Reswap': 'none',
+        'HX-Trigger': JSON.stringify({
+          showToast: { message: 'Remote root must start with /', type: 'error' },
+        }),
       });
     }
 
-    // Validate local path exists on filesystem
-    const file = Bun.file(sourcePath);
-    const exists = await file.exists();
-    if (!exists) {
-      return c.html(renderAddDirError(`Local path does not exist: ${sourcePath}`), 400, {
-        'HX-Retarget': '#add-dir-error',
-        'HX-Reswap': 'outerHTML',
+    // Validate local path exists on filesystem (works for both files and directories)
+    let pathExists = false;
+    try {
+      statSync(sourcePath);
+      pathExists = true;
+    } catch {
+      pathExists = false;
+    }
+    if (!pathExists) {
+      return c.html('', 400, {
+        'HX-Reswap': 'none',
+        'HX-Trigger': JSON.stringify({
+          showToast: { message: `Local path does not exist: ${sourcePath}`, type: 'error' },
+        }),
       });
     }
 
@@ -991,9 +997,11 @@ app.post('/api/add-directory', async (c) => {
       }),
     });
   } catch (err) {
-    return c.html(renderAddDirError(`Error: ${(err as Error).message}`), 500, {
-      'HX-Retarget': '#add-dir-error',
-      'HX-Reswap': 'outerHTML',
+    return c.html('', 500, {
+      'HX-Reswap': 'none',
+      'HX-Trigger': JSON.stringify({
+        showToast: { message: `Error: ${(err as Error).message}`, type: 'error' },
+      }),
     });
   }
 });

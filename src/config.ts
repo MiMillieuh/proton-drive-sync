@@ -180,6 +180,16 @@ export function getConfig(): Config {
   return currentConfig;
 }
 
+/**
+ * Check if a path is within any of the configured sync directories.
+ */
+export function isPathWatched(localPath: string): boolean {
+  if (!currentConfig) {
+    return false;
+  }
+  return currentConfig.sync_dirs.some((dir) => localPath.startsWith(dir.source_path));
+}
+
 /** Check if two values are deeply equal (for sync_dirs array comparison) */
 function isEqual<T>(a: T, b: T): boolean {
   return JSON.stringify(a) === JSON.stringify(b);

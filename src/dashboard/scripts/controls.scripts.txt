@@ -229,6 +229,12 @@
     if (modal) modal.remove();
   });
 
+  // Listen for showToast event from HTMX (for validation errors)
+  document.body.addEventListener('showToast', function (e) {
+    const { message, type } = e.detail;
+    showToast(message, type || 'error', 3000);
+  });
+
   // Re-initialize Lucide icons after any htmx swap
   document.body.addEventListener('htmx:afterSwap', function () {
     lucide.createIcons();

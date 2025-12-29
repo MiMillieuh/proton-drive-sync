@@ -43,12 +43,6 @@ export const AddDirectoryModal: FC = () => {
             />
           </div>
 
-          {/* Error message placeholder */}
-          <div
-            id="add-dir-error"
-            class="hidden mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm"
-          ></div>
-
           {/* Buttons */}
           <div class="flex justify-end gap-3">
             <button

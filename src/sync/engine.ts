@@ -20,7 +20,7 @@ import {
   setupWatchSubscriptions,
   type FileChange,
 } from './watcher.js';
-import { enqueueJob } from './queue.js';
+import { enqueueJob, cleanupOrphanedJobs } from './queue.js';
 import {
   processAvailableJobs,
   waitForActiveTasks,
@@ -103,6 +103,9 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
 
   await connectWatchman();
 
+  // Clean up stale/orphaned jobs from previous run
+  cleanupOrphanedJobs(dryRun);
+
   // Query all changes and enqueue jobs
   const totalChanges = await queryAllChanges(
     config,
@@ -142,6 +145,9 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
   // Helper to create file change handler with current config
   const createFileHandler = () => (file: FileChange) => handleFileChange(file, getConfig(), dryRun);
 
+  // Clean up stale/orphaned jobs from previous run
+  cleanupOrphanedJobs(dryRun);
+
   // Set up file watching
   await setupWatchSubscriptions(config, createFileHandler(), dryRun);
 
@@ -153,6 +159,7 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
   onConfigChange('sync_dirs', async () => {
     logger.info('sync_dirs changed, reinitializing watch subscriptions...');
     const newConfig = getConfig();
+    cleanupOrphanedJobs(dryRun);
     await setupWatchSubscriptions(newConfig, createFileHandler(), dryRun);
   });
 

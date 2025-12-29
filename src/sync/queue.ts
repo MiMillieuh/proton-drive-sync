@@ -9,6 +9,7 @@ import { eq, and, lte, inArray, isNull, sql } from 'drizzle-orm';
 import { db, schema, run } from '../db/index.js';
 import { SyncJobStatus, SyncEventType } from '../db/schema.js';
 import { logger, isDebugEnabled } from '../logger.js';
+import { isPathWatched } from '../config.js';
 
 // ============================================================================
 // Event Emitter for Dashboard
@@ -114,6 +115,12 @@ export function enqueueJob(
 ): void {
   if (dryRun) return;
 
+  // Guard: only enqueue if localPath is within a configured sync_dir
+  if (!isPathWatched(params.localPath)) {
+    logger.debug(`Skipping enqueue for ${params.localPath} - not in any sync_dirs`);
+    return;
+  }
+
   // Check if job is already being processed (only query if debug enabled)
   if (isDebugEnabled()) {
     const inFlight = db
@@ -161,6 +168,48 @@ export function enqueueJob(
     remotePath: params.remotePath,
     timestamp: new Date(),
   } satisfies JobEvent);
+}
+
+/**
+ * Clean up orphaned jobs on startup or config change.
+ * - Moves all PROCESSING jobs to PENDING (stale from previous run)
+ * - Deletes PENDING jobs whose localPath doesn't match any current sync_dirs
+ */
+export function cleanupOrphanedJobs(dryRun: boolean): void {
+  if (dryRun) return;
+
+  db.transaction((tx) => {
+    // 1. Move all PROCESSING -> PENDING (stale since app wasn't running)
+    const resetResult = run(
+      tx
+        .update(schema.syncJobs)
+        .set({ status: SyncJobStatus.PENDING })
+        .where(eq(schema.syncJobs.status, SyncJobStatus.PROCESSING))
+    );
+
+    // Clear processing queue table
+    tx.delete(schema.processingQueue).run();
+
+    if (resetResult.changes > 0) {
+      logger.info(`Reset ${resetResult.changes} stale processing jobs to pending`);
+    }
+
+    // 2. Delete PENDING jobs not matching any sync_dirs
+    const pendingJobs = tx
+      .select({ id: schema.syncJobs.id, localPath: schema.syncJobs.localPath })
+      .from(schema.syncJobs)
+      .where(eq(schema.syncJobs.status, SyncJobStatus.PENDING))
+      .all();
+
+    const orphanIds = pendingJobs
+      .filter((job) => !isPathWatched(job.localPath))
+      .map((job) => job.id);
+
+    if (orphanIds.length > 0) {
+      run(tx.delete(schema.syncJobs).where(inArray(schema.syncJobs.id, orphanIds)));
+      logger.info(`Removed ${orphanIds.length} orphaned pending jobs`);
+    }
+  });
 }
 
 /**
