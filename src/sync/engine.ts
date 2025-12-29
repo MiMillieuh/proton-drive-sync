@@ -9,12 +9,12 @@ import { SyncEventType } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { registerSignalHandler } from '../signals.js';
 import { setFlag, clearFlag, isPaused, FLAGS } from '../flags.js';
-import { stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
+import { sendStatusToDashboard } from '../dashboard/server.js';
 import { getConfig, onConfigChange } from '../config.js';
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
 import {
-  waitForWatchman,
+  connectWatchman,
   closeWatchman,
   queryAllChanges,
   setupWatchSubscriptions,
@@ -101,7 +101,7 @@ function handleFileChange(file: FileChange, config: Config, dryRun: boolean): vo
 export async function runOneShotSync(options: SyncOptions): Promise<void> {
   const { config, client, dryRun } = options;
 
-  await waitForWatchman();
+  await connectWatchman();
 
   // Query all changes and enqueue jobs
   const totalChanges = await queryAllChanges(
@@ -134,7 +134,7 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
 export async function runWatchMode(options: SyncOptions): Promise<void> {
   const { config, client, dryRun } = options;
 
-  await waitForWatchman();
+  await connectWatchman();
 
   // Initialize concurrency from config
   setSyncConcurrency(config.sync_concurrency);
@@ -177,8 +177,6 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
 
   // Cleanup
   await processorHandle.stop();
-  await stopDashboard();
-  closeWatchman();
 }
 
 // ============================================================================

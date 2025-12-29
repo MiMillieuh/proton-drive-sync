@@ -9,8 +9,9 @@ export { runOneShotSync, runWatchMode, type SyncOptions } from './engine.js';
 
 // Watcher (file change detection)
 export {
-  waitForWatchman,
+  connectWatchman,
   closeWatchman,
+  shutdownWatchman,
   queryAllChanges,
   setupWatchSubscriptions,
   type FileChange,

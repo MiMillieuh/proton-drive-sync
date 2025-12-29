@@ -13,6 +13,7 @@ export const FLAGS = {
   ONBOARDED: 'onboarded',
   SERVICE_INSTALLED: 'service_installed',
   SERVICE_LOADED: 'service_loaded',
+  WATCHMAN_SPAWNED: 'watchman_spawned',
 } as const;
 
 // Prefix for the running PID flag (stored as "running_pid:<pid>")

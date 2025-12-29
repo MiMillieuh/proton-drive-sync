@@ -9,6 +9,7 @@ import { basename } from 'path';
 import watchman from 'fb-watchman';
 import { getClock, setClock } from '../state.js';
 import { logger } from '../logger.js';
+import { setFlag, clearFlag, hasFlag, FLAGS } from '../flags.js';
 import type { Config } from '../config.js';
 
 // ============================================================================
@@ -47,26 +48,51 @@ let activeSubscriptions: { root: string; subName: string }[] = [];
 
 const watchmanClient = new watchman.Client();
 
-/** Wait for Watchman to be available, retrying with delay */
-export async function waitForWatchman(maxAttempts = 30, delayMs = 1000): Promise<void> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const result = Bun.spawnSync(['watchman', 'version']);
-    if (result.exitCode === 0) {
-      return;
-    }
-    if (attempt === maxAttempts) {
-      console.error('Error: Watchman failed to start.');
-      console.error('Install it from: https://facebook.github.io/watchman/docs/install');
-      process.exit(1);
-    }
-    logger.debug(`Waiting for watchman to start (attempt ${attempt}/${maxAttempts})...`);
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+/** Promisified wrapper for Watchman command */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function watchmanCommand<T>(args: any[]): Promise<T> {
+  return new Promise((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (watchmanClient as any).command(args, (err: Error | null, resp: T) => {
+      if (err) reject(err);
+      else resolve(resp);
+    });
+  });
+}
+
+/** Check if watchman is already running without starting it */
+function isWatchmanRunning(): boolean {
+  const result = Bun.spawnSync(['watchman', 'get-pid', '--no-spawn']);
+  return result.exitCode === 0;
+}
+
+/** Connect to Watchman and track if we spawned it */
+export async function connectWatchman(): Promise<void> {
+  const wasRunning = isWatchmanRunning();
+
+  // The client will auto-start watchman if not running
+  await watchmanCommand<{ version: string }>(['version']);
+
+  if (!wasRunning) {
+    setFlag(FLAGS.WATCHMAN_SPAWNED);
+    logger.debug('Watchman was not running, we spawned it');
+  } else {
+    logger.debug('Watchman was already running');
   }
 }
 
 /** Close the Watchman client connection */
 export function closeWatchman(): void {
   watchmanClient.end();
+}
+
+/** Shutdown watchman server if we spawned it */
+export function shutdownWatchman(): void {
+  if (hasFlag(FLAGS.WATCHMAN_SPAWNED)) {
+    logger.debug('Shutting down watchman server (we spawned it)');
+    Bun.spawnSync(['watchman', 'shutdown-server']);
+    clearFlag(FLAGS.WATCHMAN_SPAWNED);
+  }
 }
 
 // ============================================================================

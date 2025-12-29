@@ -11,7 +11,7 @@ import { acquireRunLock, releaseRunLock } from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
 import { startDashboard, stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
 import { startDashboardMode } from '../dashboard/app.js';
-import { runOneShotSync, runWatchMode } from '../sync/index.js';
+import { runOneShotSync, runWatchMode, closeWatchman, shutdownWatchman } from '../sync/index.js';
 
 // ============================================================================
 // Types
@@ -185,6 +185,8 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
   // Set up cleanup handler
   const cleanup = async (): Promise<void> => {
+    closeWatchman();
+    shutdownWatchman();
     await stopDashboard();
     stopSignalListener();
     releaseRunLock();
