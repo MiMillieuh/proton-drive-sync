@@ -60,7 +60,10 @@ function loadService(name: string, plistPath: string): ServiceResult {
 
   // Bootstrap failed - check if already loaded (exit code 37 = "Service already loaded")
   const bootstrapStderr = new TextDecoder().decode(bootstrap.stderr).trim();
-  const alreadyLoaded = bootstrap.exitCode === 37 || bootstrapStderr.includes('already loaded');
+  const alreadyLoaded =
+    bootstrap.exitCode === 37 ||
+    bootstrap.exitCode === 5 ||
+    bootstrapStderr.includes('already loaded');
 
   if (alreadyLoaded) {
     // Already loaded, try kickstart to restart it
@@ -77,7 +80,7 @@ function loadService(name: string, plistPath: string): ServiceResult {
 
   return {
     success: false,
-    error: `Failed to bootstrap service: ${bootstrapStderr || `exit code ${bootstrap.exitCode}`}`,
+    error: `Failed to bootstrap service: ${bootstrapStderr || `exit code ${bootstrap.exitCode}`}\nService may already be loaded. Try \`proton-drive-sync service unload\` then \`service load\`.`,
   };
 }
 
@@ -254,7 +257,7 @@ export function serviceUnloadCommand(): void {
     process.exit(1);
   }
   sendSignal('stop');
-  logger.info('Service stopped and unloaded. Run `proton-drive-sync service start` to restart.');
+  logger.info('Service stopped and unloaded. Run `proton-drive-sync service load` to restart.');
 }
 
 export function serviceLoadCommand(): void {
