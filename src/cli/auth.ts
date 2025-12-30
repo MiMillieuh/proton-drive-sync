@@ -1,5 +1,5 @@
 /**
- * Auth Command - Authenticate and save credentials to Keychain
+ * Auth Command - Authenticate and save credentials securely
  */
 
 import { input, password } from '@inquirer/prompts';
@@ -150,7 +150,7 @@ export async function authCommand(): Promise<void> {
     // Save tokens and username to keychain
     await deleteStoredCredentials();
     await storeCredentials(credentials);
-    logger.info('Credentials saved to Keychain.');
+    logger.info('Credentials saved securely.');
   } catch (error) {
     logger.error('Authentication failed:', (error as Error).message);
     process.exit(1);

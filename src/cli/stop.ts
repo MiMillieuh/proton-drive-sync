@@ -11,7 +11,7 @@ import { logger } from '../logger.js';
 /**
  * Stop the sync process gracefully by sending a stop signal.
  * The process will detect this signal and exit cleanly (exit code 0),
- * which means launchd won't restart it (due to KeepAlive.SuccessfulExit: false).
+ * which means the service manager (launchd/systemd) won't restart it.
  */
 export function stopCommand(): void {
   // Check if a sync process is running first

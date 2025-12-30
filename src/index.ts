@@ -25,7 +25,7 @@ program.name('proton-drive-sync').description('Sync local files to Proton Drive'
 
 program
   .command('auth')
-  .description('Authenticate and save credentials to Keychain')
+  .description('Authenticate and save credentials securely')
   .action(authCommand);
 
 program.command('config').description('Open config file in nano').action(configCommand);
