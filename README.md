@@ -11,7 +11,7 @@ Automatically syncs selected local folders to Proton Drive in the background, wi
 ### Install: macOS / Linux
 
 ```bash
-bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh)
+$ bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh)
 ```
 
 <details>
@@ -30,7 +30,7 @@ irm https://www.damianb.dev/proton-drive-sync/install.ps1 | iex
 | Platform            | Requirements                                                |
 | ------------------- | ----------------------------------------------------------- |
 | **macOS**           | [Homebrew](https://brew.sh) (for Watchman)                  |
-| **Linux** (beta)    | None                                                        |
+| **Linux** (beta)    | No extra requirements                                       |
 | **Windows** (alpha) | [Chocolatey](https://chocolatey.org/install) (for Watchman) |
 
 ### Dashboard
@@ -50,7 +50,7 @@ The dashboard runs locally at http://localhost:4242. Use it to configure and man
 ### Uninstall: macOS / Linux
 
 ```bash
-bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/uninstall.sh)
+$ bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/uninstall.sh)
 ```
 
 <details>
