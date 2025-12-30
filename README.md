@@ -4,7 +4,7 @@ Automatically syncs selected local folders to Proton Drive in the background, wi
 
 <p align="center">
 
-https://github.com/user-attachments/assets/b3fbf4c6-a991-43a3-b391-b6090209ad97
+https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1
 
 </p>
 
