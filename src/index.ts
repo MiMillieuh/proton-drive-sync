@@ -14,7 +14,7 @@ import {
   serviceUninstallCommand,
   serviceUnloadCommand,
   serviceLoadCommand,
-} from './cli/service.js';
+} from './cli/service/index.js';
 import { stopCommand } from './cli/stop.js';
 import { startCommand } from './cli/start.js';
 import { dashboardCommand } from './cli/dashboard.js';
@@ -82,16 +82,16 @@ logsCmd.command('clear').description('Clear log file').action(logsClearCommand);
 
 const serviceCommand = program
   .command('service')
-  .description('Manage launchd service (macOS only)');
+  .description('Manage system service (macOS launchd / Linux systemd)');
 
 serviceCommand
   .command('install')
-  .description('Install and start the launchd service')
+  .description('Install and start the system service')
   .action(serviceInstallCommand);
 
 serviceCommand
   .command('uninstall')
-  .description('Stop and uninstall the launchd service')
+  .description('Stop and uninstall the system service')
   .option('-y, --yes', 'Skip confirmation prompts')
   .action((options) => serviceUninstallCommand(!options.yes));
 

@@ -1179,11 +1179,15 @@ app.get('/api/events', async (c) => {
   });
 });
 
+// Maximum number of log lines to send on initial connection
+const MAX_INITIAL_LOG_LINES = 500;
+
 // GET /api/logs - SSE stream of log lines as HTML
 app.get('/api/logs', async (c) => {
   return streamSSE(c, async (stream) => {
     // Start from where the log file was when dashboard subprocess started
     let currentPosition = initialLogPosition;
+    let isInitialLoad = true;
 
     const sendNewLines = async () => {
       try {
@@ -1202,12 +1206,32 @@ app.get('/api/logs', async (c) => {
 
         const rl = createInterface({ input: readStream });
 
-        for await (const line of rl) {
-          if (line.trim()) {
+        // Collect lines first if initial load (to limit count)
+        if (isInitialLoad) {
+          const lines: string[] = [];
+          for await (const line of rl) {
+            if (line.trim()) {
+              lines.push(line);
+            }
+          }
+          // Only send the last MAX_INITIAL_LOG_LINES
+          const startIndex = Math.max(0, lines.length - MAX_INITIAL_LOG_LINES);
+          for (let i = startIndex; i < lines.length; i++) {
             await stream.writeSSE({
               event: 'log',
-              data: renderLogLine(line),
+              data: renderLogLine(lines[i]),
             });
+          }
+          isInitialLoad = false;
+        } else {
+          // Stream new lines directly
+          for await (const line of rl) {
+            if (line.trim()) {
+              await stream.writeSSE({
+                event: 'log',
+                data: renderLogLine(line),
+              });
+            }
           }
         }
 
@@ -1217,7 +1241,7 @@ app.get('/api/logs', async (c) => {
       }
     };
 
-    // Send all logs from startup immediately
+    // Send logs from startup (limited to last MAX_INITIAL_LOG_LINES)
     await sendNewLines();
 
     const onFileChange = () => {

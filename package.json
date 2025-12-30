@@ -13,6 +13,7 @@
     "build:bin": "bun build --compile --minify --sourcemap ./src/index.ts --outfile ./dist/proton-drive-sync",
     "build:bin:darwin-arm64": "bun build --compile --minify --target=bun-darwin-arm64 ./src/index.ts --outfile ./dist/proton-drive-sync-darwin-arm64",
     "build:bin:darwin-x64": "bun build --compile --minify --target=bun-darwin-x64 ./src/index.ts --outfile ./dist/proton-drive-sync-darwin-x64",
+    "build:bin:linux-x64": "bun build --compile --minify --target=bun-linux-x64 ./src/index.ts --outfile ./dist/proton-drive-sync-linux-x64",
     "prepare": "husky"
   },
   "keywords": [
@@ -37,7 +38,7 @@
     "drizzle-orm": "^0.45.0",
     "fb-watchman": "^2.0.2",
     "hono": "^4.10.7",
-    "keychain": "^1.5.0",
+    "keytar": "^7.9.0",
     "openpgp": "^6.2.2",
     "p-retry": "^7.1.0",
     "winston": "^3.18.3",

@@ -1,17 +1,16 @@
 /**
  * Keychain utilities for storing and retrieving Proton credentials
+ *
+ * Uses keytar for cross-platform secure credential storage:
+ * - macOS: Keychain
+ * - Linux: libsecret (GNOME Keyring, KWallet, etc.)
  */
 
-// @ts-expect-error - keychain doesn't have type definitions
-import keychain from 'keychain';
-import { promisify } from 'util';
+import keytar from 'keytar';
+import { logger } from './logger.js';
 
 const KEYCHAIN_SERVICE = 'proton-drive-sync';
 const KEYCHAIN_ACCOUNT = 'proton-drive-sync:tokens';
-
-const keychainGetPassword = promisify(keychain.getPassword).bind(keychain);
-const keychainSetPassword = promisify(keychain.setPassword).bind(keychain);
-const keychainDeletePassword = promisify(keychain.deletePassword).bind(keychain);
 
 /** Tokens stored in keychain for session reuse */
 export interface StoredCredentials {
@@ -24,30 +23,22 @@ export interface StoredCredentials {
 
 export async function getStoredCredentials(): Promise<StoredCredentials | null> {
   try {
-    const data = await keychainGetPassword({
-      account: KEYCHAIN_ACCOUNT,
-      service: KEYCHAIN_SERVICE,
-    });
+    const data = await keytar.getPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+    if (!data) return null;
     return JSON.parse(data) as StoredCredentials;
-  } catch {
+  } catch (error) {
+    logger.debug(`Failed to get stored credentials: ${error}`);
     return null;
   }
 }
 
 export async function storeCredentials(credentials: StoredCredentials): Promise<void> {
-  await keychainSetPassword({
-    account: KEYCHAIN_ACCOUNT,
-    service: KEYCHAIN_SERVICE,
-    password: JSON.stringify(credentials),
-  });
+  await keytar.setPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, JSON.stringify(credentials));
 }
 
 export async function deleteStoredCredentials(): Promise<void> {
   try {
-    await keychainDeletePassword({
-      account: KEYCHAIN_ACCOUNT,
-      service: KEYCHAIN_SERVICE,
-    });
+    await keytar.deletePassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
   } catch {
     // Ignore - may not exist
   }

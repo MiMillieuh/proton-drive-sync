@@ -1,0 +1,172 @@
+/**
+ * Service management - platform dispatcher
+ *
+ * Delegates to platform-specific implementations:
+ * - macOS: launchd (LaunchAgents)
+ * - Linux: systemd (user services)
+ */
+
+import * as readline from 'readline';
+import { sendSignal } from '../../signals.js';
+import { hasFlag, FLAGS } from '../../flags.js';
+import { logger } from '../../logger.js';
+import type { ServiceOperations } from './types.js';
+
+function askYesNo(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`${question} (y/n): `, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+    });
+  });
+}
+
+function getBinPathSafe(): string | null {
+  const result = Bun.spawnSync(['which', 'proton-drive-sync']);
+  if (result.exitCode !== 0) return null;
+  return new TextDecoder().decode(result.stdout).trim();
+}
+
+async function getServiceManager(): Promise<ServiceOperations> {
+  if (process.platform === 'darwin') {
+    const mod = await import('./service-macos.js');
+    return mod.macosService;
+  } else if (process.platform === 'linux') {
+    const mod = await import('./service-linux.js');
+    return mod.linuxService;
+  }
+  throw new Error(`Unsupported platform: ${process.platform}`);
+}
+
+function isSupportedPlatform(): boolean {
+  return process.platform === 'darwin' || process.platform === 'linux';
+}
+
+export async function serviceInstallCommand(interactive: boolean = true): Promise<void> {
+  if (!isSupportedPlatform()) {
+    if (interactive) {
+      logger.error(`Service installation is only supported on macOS and Linux.`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  const binPath = getBinPathSafe();
+  if (!binPath) {
+    if (interactive) {
+      logger.error('proton-drive-sync not found in PATH.');
+      logger.error(
+        'Install with: curl -fsSL https://proton-drive-sync.damianb.dev/install.sh | bash'
+      );
+      process.exit(1);
+    }
+    return;
+  }
+
+  const service = await getServiceManager();
+
+  const installSync = interactive ? await askYesNo('Install proton-drive-sync service?') : true;
+  if (installSync) {
+    await service.install(binPath);
+  } else {
+    logger.info('Skipping proton-drive-sync service.');
+  }
+}
+
+export async function serviceUninstallCommand(interactive: boolean = true): Promise<void> {
+  if (!isSupportedPlatform()) {
+    if (interactive) {
+      logger.error(`Service uninstallation is only supported on macOS and Linux.`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  const service = await getServiceManager();
+
+  if (!service.isInstalled()) {
+    if (interactive) {
+      logger.info('No service is installed.');
+    }
+    return;
+  }
+
+  const uninstallSync = interactive ? await askYesNo('Uninstall proton-drive-sync service?') : true;
+  if (uninstallSync) {
+    await service.uninstall(interactive);
+  } else {
+    logger.info('Skipping proton-drive-sync service.');
+  }
+}
+
+/**
+ * Check if the service is installed (using flag)
+ */
+export function isServiceInstalled(): boolean {
+  return hasFlag(FLAGS.SERVICE_INSTALLED);
+}
+
+/**
+ * Load the sync service (enable start on login)
+ * Returns true on success, false on failure
+ */
+export async function loadSyncService(): Promise<boolean> {
+  if (!isSupportedPlatform()) {
+    return false;
+  }
+
+  const service = await getServiceManager();
+  return service.load();
+}
+
+/**
+ * Unload the sync service (disable start on login)
+ * Returns true on success, false on failure
+ */
+export async function unloadSyncService(): Promise<boolean> {
+  if (!isSupportedPlatform()) {
+    return false;
+  }
+
+  const service = await getServiceManager();
+  return service.unload();
+}
+
+export async function serviceUnloadCommand(): Promise<void> {
+  if (!isSupportedPlatform()) {
+    logger.error(`Service management is only supported on macOS and Linux.`);
+    process.exit(1);
+  }
+
+  if (!(await unloadSyncService())) {
+    logger.error('Failed to unload service.');
+    process.exit(1);
+  }
+  sendSignal('stop');
+  logger.info('Service stopped and unloaded. Run `proton-drive-sync service load` to restart.');
+}
+
+export async function serviceLoadCommand(): Promise<void> {
+  if (!isSupportedPlatform()) {
+    logger.error(`Service management is only supported on macOS and Linux.`);
+    process.exit(1);
+  }
+
+  const service = await getServiceManager();
+  if (!service.isInstalled()) {
+    logger.error('Service is not installed. Run `proton-drive-sync service install` first.');
+    process.exit(1);
+  }
+
+  if (await loadSyncService()) {
+    logger.info('Service started.');
+  } else {
+    logger.error('Failed to start service.');
+    process.exit(1);
+  }
+}

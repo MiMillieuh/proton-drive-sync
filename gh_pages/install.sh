@@ -70,6 +70,7 @@ if [[ "$arch" == "x86_64" ]]; then
 	arch="x64"
 fi
 
+# Rosetta detection (macOS only)
 if [ "$os" = "darwin" ] && [ "$arch" = "x64" ]; then
 	rosetta_flag=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
 	if [ "$rosetta_flag" = "1" ]; then
@@ -77,16 +78,18 @@ if [ "$os" = "darwin" ] && [ "$arch" = "x64" ]; then
 	fi
 fi
 
-if [ "$os" != "darwin" ]; then
-	echo -e "${RED}Error: proton-drive-sync is only supported on macOS${NC}"
-	exit 1
-fi
-
+# Validate OS/arch combination
 combo="$os-$arch"
 case "$combo" in
-darwin-x64 | darwin-arm64) ;;
+darwin-x64 | darwin-arm64 | linux-x64) ;;
+linux-arm64)
+	echo -e "${RED}Error: Linux ARM64 is not currently supported${NC}"
+	echo -e "${MUTED}Only Linux x64 (x86_64) is supported at this time${NC}"
+	exit 1
+	;;
 *)
-	echo -e "${RED}Unsupported architecture: $arch${NC}"
+	echo -e "${RED}Unsupported platform: $combo${NC}"
+	echo -e "${MUTED}Supported platforms: macOS (x64, arm64), Linux (x64)${NC}"
 	exit 1
 	;;
 esac
@@ -101,19 +104,138 @@ if ! command -v tar >/dev/null 2>&1; then
 	exit 1
 fi
 
-# Check for Homebrew
-if ! command -v brew >/dev/null 2>&1; then
-	echo -e "${RED}Error: Homebrew is required but not installed.${NC}"
-	echo -e "Install it from: https://brew.sh"
-	exit 1
-fi
+# ============================================================================
+# Install Watchman
+# ============================================================================
 
-# Install Watchman if not present
-if ! command -v watchman >/dev/null 2>&1; then
-	echo -e "${MUTED}Installing Watchman...${NC}"
+install_watchman_macos() {
+	# Check for Homebrew
+	if ! command -v brew >/dev/null 2>&1; then
+		echo -e "${RED}Error: Homebrew is required but not installed.${NC}"
+		echo -e "Install it from: https://brew.sh"
+		exit 1
+	fi
+
+	echo -e "${MUTED}Installing Watchman via Homebrew...${NC}"
 	brew update
 	brew install watchman
-fi
+}
+
+install_watchman_linux() {
+	echo -e "${MUTED}Installing Watchman from Facebook releases...${NC}"
+
+	# Detect package manager and install dependencies
+	if command -v apt-get >/dev/null 2>&1; then
+		echo -e "${MUTED}Installing dependencies (curl, unzip)...${NC}"
+		sudo apt-get update
+		sudo apt-get install -y curl unzip
+	elif command -v dnf >/dev/null 2>&1; then
+		echo -e "${MUTED}Installing dependencies (curl, unzip)...${NC}"
+		sudo dnf install -y curl unzip
+	elif command -v pacman >/dev/null 2>&1; then
+		echo -e "${MUTED}Installing dependencies (curl, unzip)...${NC}"
+		sudo pacman -Sy --noconfirm curl unzip
+	fi
+
+	# Get latest version from GitHub API
+	local version
+	version=$(curl -s https://api.github.com/repos/facebook/watchman/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+
+	if [[ -z "$version" ]]; then
+		echo -e "${RED}Error: Failed to determine latest Watchman version${NC}"
+		exit 1
+	fi
+
+	echo -e "${MUTED}Downloading Watchman ${version}...${NC}"
+
+	local url="https://github.com/facebook/watchman/releases/download/${version}/watchman-${version}-linux.zip"
+	local tmp_dir
+	tmp_dir=$(mktemp -d)
+
+	curl -L -o "$tmp_dir/watchman.zip" "$url"
+	unzip -q "$tmp_dir/watchman.zip" -d "$tmp_dir"
+
+	# Find the extracted directory (name varies with version)
+	local watchman_dir
+	watchman_dir=$(find "$tmp_dir" -maxdepth 1 -type d -name "watchman-*" | head -1)
+
+	if [[ -z "$watchman_dir" ]]; then
+		echo -e "${RED}Error: Failed to extract Watchman${NC}"
+		rm -rf "$tmp_dir"
+		exit 1
+	fi
+
+	echo -e "${MUTED}Installing Watchman to /usr/local...${NC}"
+	sudo mkdir -p /usr/local/bin /usr/local/lib /usr/local/var/run/watchman
+	sudo cp "$watchman_dir/bin/watchman" /usr/local/bin/
+	sudo cp -r "$watchman_dir/lib/"* /usr/local/lib/ 2>/dev/null || true
+	sudo chmod +x /usr/local/bin/watchman
+	sudo chmod 1777 /usr/local/var/run/watchman
+
+	rm -rf "$tmp_dir"
+
+	# Update library cache on Linux
+	if command -v ldconfig >/dev/null 2>&1; then
+		sudo ldconfig 2>/dev/null || true
+	fi
+
+	echo -e "${MUTED}Watchman installed successfully${NC}"
+}
+
+install_watchman() {
+	if command -v watchman >/dev/null 2>&1; then
+		echo -e "${MUTED}Watchman is already installed${NC}"
+		return
+	fi
+
+	if [ "$os" = "darwin" ]; then
+		install_watchman_macos
+	elif [ "$os" = "linux" ]; then
+		install_watchman_linux
+	fi
+
+	# Verify installation
+	if ! command -v watchman >/dev/null 2>&1; then
+		echo -e "${RED}Error: Watchman installation failed${NC}"
+		exit 1
+	fi
+}
+
+# ============================================================================
+# Install libsecret (Linux only, required for credential storage)
+# ============================================================================
+
+install_libsecret() {
+	if [ "$os" != "linux" ]; then
+		return
+	fi
+
+	echo -e "${MUTED}Checking for libsecret (required for credential storage)...${NC}"
+
+	# Check if libsecret is already available
+	if ldconfig -p 2>/dev/null | grep -q libsecret; then
+		echo -e "${MUTED}libsecret is already installed${NC}"
+		return
+	fi
+
+	echo -e "${MUTED}Installing libsecret...${NC}"
+
+	if command -v apt-get >/dev/null 2>&1; then
+		sudo apt-get update
+		sudo apt-get install -y libsecret-1-0 gnome-keyring
+	elif command -v dnf >/dev/null 2>&1; then
+		sudo dnf install -y libsecret gnome-keyring
+	elif command -v pacman >/dev/null 2>&1; then
+		sudo pacman -Sy --noconfirm libsecret gnome-keyring
+	else
+		echo -e "${ORANGE}Warning: Could not install libsecret automatically${NC}"
+		echo -e "${MUTED}Please install libsecret manually for your distribution${NC}"
+	fi
+}
+
+# Install dependencies
+install_watchman
+install_libsecret
 
 INSTALL_DIR=$HOME/.local/bin
 mkdir -p "$INSTALL_DIR"
@@ -285,7 +407,22 @@ echo -e ""
 echo -e "${MUTED}Proton Drive Sync is now running!${NC}"
 echo -e ""
 echo -e "${MUTED}Opening dashboard...${NC}"
-open "http://localhost:4242"
+
+# Open browser (platform-specific)
+open_browser() {
+	local url="$1"
+	if [ "$os" = "darwin" ]; then
+		open "$url"
+	elif [ "$os" = "linux" ]; then
+		if command -v xdg-open >/dev/null 2>&1; then
+			xdg-open "$url" 2>/dev/null || echo -e "${MUTED}Open $url in your browser${NC}"
+		else
+			echo -e "${MUTED}Open $url in your browser${NC}"
+		fi
+	fi
+}
+
+open_browser "http://localhost:4242"
 
 echo -e ""
 echo -e "${MUTED}Complete your configuration by visiting the dashboard at:${NC}"

@@ -16,6 +16,8 @@ jobs:
             target: darwin-arm64
           - os: macos-15
             target: darwin-x64
+          - os: ubuntu-latest
+            target: linux-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -28,8 +30,21 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install Watchman
+      - name: Install Watchman (macOS)
+        if: runner.os == 'macOS'
         run: brew install watchman
+
+      - name: Install Watchman (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/facebook/watchman/releases/latest | jq -r '.tag_name')
+          curl -L -o watchman.zip "https://github.com/facebook/watchman/releases/download/${VERSION}/watchman-${VERSION}-linux.zip"
+          unzip watchman.zip
+          sudo mkdir -p /usr/local/bin /usr/local/lib /usr/local/var/run/watchman
+          sudo cp watchman-*/bin/watchman /usr/local/bin/
+          sudo cp -r watchman-*/lib/* /usr/local/lib/ 2>/dev/null || true
+          sudo chmod +x /usr/local/bin/watchman
+          sudo chmod 1777 /usr/local/var/run/watchman
 
       - name: Install dependencies
         run: bun install

@@ -29,6 +29,9 @@
   // Log level filtering
   let currentLogLevel = 20;
 
+  // Maximum number of log elements to keep in DOM
+  const MAX_LOG_ELEMENTS = 500;
+
   function setLogLevel(level) {
     currentLogLevel = level;
     // Update button styles
@@ -51,18 +54,42 @@
     });
   }
 
-  // Apply filter to new log lines as they arrive
+  // Apply filter to new log lines as they arrive (debounced)
   const logsContainer = document.getElementById('logs-container');
   if (logsContainer) {
+    let pendingNodes = [];
+    let debounceTimer = null;
+
+    function processPendingNodes() {
+      // Apply log level filter to pending nodes
+      pendingNodes.forEach((node) => {
+        if (node.nodeType === 1 && node.hasAttribute('data-level')) {
+          const logLevel = parseInt(node.getAttribute('data-level') || '0');
+          node.style.display = logLevel >= currentLogLevel ? '' : 'none';
+        }
+      });
+      pendingNodes = [];
+
+      // Trim excess DOM elements (keep only last MAX_LOG_ELEMENTS)
+      const logElements = logsContainer.querySelectorAll('div[data-level]');
+      const excess = logElements.length - MAX_LOG_ELEMENTS;
+      if (excess > 0) {
+        for (let i = 0; i < excess; i++) {
+          logElements[i].remove();
+        }
+      }
+    }
+
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1 && node.hasAttribute('data-level')) {
-            const logLevel = parseInt(node.getAttribute('data-level') || '0');
-            node.style.display = logLevel >= currentLogLevel ? '' : 'none';
-          }
+          pendingNodes.push(node);
         });
       });
+
+      // Debounce processing - wait 50ms for more nodes before processing
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(processPendingNodes, 50);
     });
     observer.observe(logsContainer, { childList: true });
   }

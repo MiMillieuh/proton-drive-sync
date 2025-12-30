@@ -15,7 +15,7 @@ import {
   loadSyncService,
   unloadSyncService,
   serviceInstallCommand,
-} from './service.js';
+} from './service/index.js';
 import { startDashboardMode } from '../dashboard/app.js';
 import { runOneShotSync, runWatchMode, closeWatchman, shutdownWatchman } from '../sync/index.js';
 
@@ -108,8 +108,7 @@ function spawnDaemon(options: StartOptions): void {
   if (options.debug) args.push('--debug', String(options.debug));
   if (options.paused) args.push('--paused');
 
-  // Use the full executable path to avoid PATH resolution issues (e.g., in launchd environment)
-  const child = Bun.spawn([process.execPath, ...args], {
+  const child = Bun.spawn(['proton-drive-sync', ...args], {
     detached: true,
     stdio: ['ignore', 'ignore', 'ignore'],
     env: { ...process.env },
@@ -257,13 +256,13 @@ export async function startCommand(options: StartOptions): Promise<void> {
     if (!isInstalled) {
       await serviceInstallCommand(false);
     } else {
-      loadSyncService();
+      await loadSyncService();
     }
   });
 
   // Handle start-on-login disable signal
-  registerSignalHandler('start-on-login-disable', () => {
-    unloadSyncService();
+  registerSignalHandler('start-on-login-disable', async () => {
+    await unloadSyncService();
   });
 
   // Start dashboard early (before auth) so user can see auth status

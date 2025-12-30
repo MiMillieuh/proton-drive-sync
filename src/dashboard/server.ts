@@ -195,8 +195,7 @@ export function startDashboard(config: Config, dryRun = false): void {
 
   logger.debug(`Dashboard starting with dryRun=${dryRun}`);
 
-  // Use the full executable path to avoid PATH resolution issues (e.g., in launchd environment)
-  dashboardProcess = Bun.spawn([process.execPath, 'start', '--dashboard'], {
+  dashboardProcess = Bun.spawn(['proton-drive-sync', 'start', '--dashboard'], {
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'inherit',
