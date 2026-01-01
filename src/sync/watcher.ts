@@ -248,6 +248,9 @@ export async function setupWatchSubscriptions(
     // Check if this is one of our subscriptions
     if (!resp.subscription.startsWith(WATCHMAN_SUB_NAME)) return;
 
+    // Log full subscription event data
+    logger.info(`Watchman subscription event: ${JSON.stringify(resp)}`);
+
     // Use Watchman's root directly instead of parsing from subscription name
     const watchRoot = (resp as unknown as { root: string }).root;
 
