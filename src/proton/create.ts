@@ -143,13 +143,23 @@ async function createDirectory(
  * @param client - The Proton Drive client
  * @param localPath - The local file path to read from (e.g., "/Users/foo/my_files/bar.txt")
  * @param remotePath - The remote path on Proton Drive (e.g., "backup/my_files/bar.txt")
+ * @param dryRun - If true, skip network calls and return dummy result
  * @returns CreateResult with success status and node UID
  */
 export async function createNode(
   client: CreateProtonDriveClient,
   localPath: string,
-  remotePath: string
+  remotePath: string,
+  dryRun = false
 ): Promise<CreateResult> {
+  if (dryRun) {
+    return {
+      success: true,
+      nodeUid: 'dry-run-node-uid',
+      parentNodeUid: 'dry-run-parent-uid',
+      isDirectory: false,
+    };
+  }
   // Check if path exists locally
   let pathStat: Stats | null = null;
   let isDirectory = false;

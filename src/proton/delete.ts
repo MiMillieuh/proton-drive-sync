@@ -25,13 +25,17 @@ export type { DeleteProtonDriveClient, DeleteOperationResult } from './types.js'
  *
  * @param client - The Proton Drive client
  * @param remotePath - The remote path (e.g., "my_files/foo/bar.txt")
- * @param permanent - If true, permanently delete; if false, move to trash (default)
+ * @param dryRun - If true, skip network calls and return dummy result
  * @returns DeleteOperationResult with success status
  */
 export async function deleteNode(
   client: DeleteProtonDriveClient,
-  remotePath: string
+  remotePath: string,
+  dryRun = false
 ): Promise<DeleteOperationResult> {
+  if (dryRun) {
+    return { success: true, existed: false };
+  }
   const { parentParts, name } = parsePath(remotePath);
 
   // Get root folder

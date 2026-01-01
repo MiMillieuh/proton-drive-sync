@@ -64,13 +64,18 @@ async function resolveParentFolderUid(
  * @param nodeUid - The UID of the node to relocate
  * @param options.newParentNodeUid - The UID of the new parent folder (for moves)
  * @param options.newName - The new name for the node (for renames)
+ * @param dryRun - If true, skip network calls and return dummy result
  * @returns RelocateResult with success status
  */
 export async function relocateNode(
   client: ProtonDriveClient,
   nodeUid: string,
-  options: { newParentNodeUid?: string; newName?: string }
+  options: { newParentNodeUid?: string; newName?: string },
+  dryRun = false
 ): Promise<RelocateResult> {
+  if (dryRun) {
+    return { success: true, nodeUid };
+  }
   const { newParentNodeUid, newName } = options;
 
   if (!newParentNodeUid && !newName) {
@@ -125,11 +130,16 @@ export async function relocateNode(
  *
  * @param client - The Proton Drive client
  * @param remotePath - The remote path (e.g., "backup/folder/file.txt")
+ * @param dryRun - If true, skip network calls and return dummy result
  * @returns The parent folder's nodeUid
  */
 export async function getParentFolderUid(
   client: ProtonDriveClient,
-  remotePath: string
+  remotePath: string,
+  dryRun = false
 ): Promise<string> {
+  if (dryRun) {
+    return 'dry-run-parent-uid';
+  }
   return resolveParentFolderUid(client, remotePath);
 }

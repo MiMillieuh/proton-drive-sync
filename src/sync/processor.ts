@@ -115,8 +115,7 @@ async function deleteNodeOrThrow(
   remotePath: string,
   dryRun: boolean
 ): Promise<{ existed: boolean }> {
-  if (dryRun) return { existed: false };
-  const result = await deleteNode(client, remotePath);
+  const result = await deleteNode(client, remotePath, dryRun);
   if (!result.success) {
     throw new Error(result.error);
   }
@@ -130,9 +129,7 @@ async function createNodeOrThrow(
   remotePath: string,
   dryRun: boolean
 ): Promise<{ nodeUid: string; parentNodeUid: string; isDirectory: boolean }> {
-  if (dryRun)
-    return { nodeUid: 'dry-run-node-uid', parentNodeUid: 'dry-run-parent-uid', isDirectory: false };
-  const result = await createNode(client, localPath, remotePath);
+  const result = await createNode(client, localPath, remotePath, dryRun);
   if (!result.success || !result.nodeUid) {
     throw new Error(result.error ?? 'createNode returned success but no nodeUid');
   }
@@ -231,11 +228,9 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
           throw new Error(`Node mapping not found for ${oldLocalPath}, cannot rename`);
         }
         const newName = path.basename(localPath);
-        if (!dryRun) {
-          const result = await relocateNode(client, mapping.nodeUid, { newName });
-          if (!result.success) {
-            throw new Error(result.error);
-          }
+        const result = await relocateNode(client, mapping.nodeUid, { newName }, dryRun);
+        if (!result.success) {
+          throw new Error(result.error);
         }
         db.transaction((tx) => {
           if (!dryRun) {
@@ -262,9 +257,7 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
 
         // Get the new parent's nodeUid
         const newParentLocalPath = path.dirname(localPath);
-        const newParentNodeUid = dryRun
-          ? 'dry-run-parent-uid'
-          : await getParentFolderUid(client, newParentLocalPath);
+        const newParentNodeUid = await getParentFolderUid(client, newParentLocalPath, dryRun);
         if (!newParentNodeUid) {
           throw new Error(`Parent folder not found for ${newParentLocalPath}`);
         }
@@ -273,14 +266,17 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         const newName = path.basename(localPath);
         const nameChanged = oldName !== newName;
 
-        if (!dryRun) {
-          const result = await relocateNode(client, mapping.nodeUid, {
+        const result = await relocateNode(
+          client,
+          mapping.nodeUid,
+          {
             newParentNodeUid,
             newName: nameChanged ? newName : undefined,
-          });
-          if (!result.success) {
-            throw new Error(result.error);
-          }
+          },
+          dryRun
+        );
+        if (!result.success) {
+          throw new Error(result.error);
         }
         db.transaction((tx) => {
           if (!dryRun) {
