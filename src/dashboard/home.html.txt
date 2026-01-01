@@ -1,6 +1,6 @@
 <div class="max-w-7xl mx-auto space-y-8">
   <!-- Stats Overview -->
-  <div id="stats" hx-swap="morph:innerHTML" sse-swap="stats" hx-swap-oob="morph:innerHTML">
+  <div id="stats" hx-ext="morph" hx-swap="morph:innerHTML" sse-swap="stats" hx-swap-oob="morph:innerHTML">
     {{STATS_CONTENT}}
   </div>
 

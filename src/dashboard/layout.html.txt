@@ -120,7 +120,7 @@
       };
     </script>
   </head>
-  <body class="h-full flex flex-col" hx-ext="sse,morph" sse-connect="/api/events">
+  <body class="h-full flex flex-col" hx-ext="sse" sse-connect="/api/events">
     <!-- Dry-Run Warning Banner -->
     <div id="dry-run-banner" hx-swap="outerHTML" sse-swap="dry-run-banner">
       {{DRY_RUN_BANNER_CONTENT}}
@@ -220,7 +220,7 @@
           </div>
 
           <!-- Auth Status: third to collapse (below 550px) -->
-          <div id="auth-status" class="auth-badge" hx-swap="morph:innerHTML" sse-swap="auth">
+          <div id="auth-status" class="auth-badge" hx-ext="morph" hx-swap="morph:innerHTML" sse-swap="auth">
             {{AUTH_STATUS_CONTENT}}
           </div>
 
@@ -228,6 +228,7 @@
           <div
             id="syncing-status"
             class="connected-badge"
+            hx-ext="morph"
             hx-swap="morph:innerHTML"
             sse-swap="syncing"
           >
