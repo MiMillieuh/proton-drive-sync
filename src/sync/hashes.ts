@@ -26,7 +26,8 @@ export function getStoredHash(localPath: string, tx: Tx): string | null {
 /**
  * Delete the stored hash for a local path.
  */
-export function deleteStoredHash(localPath: string, tx: Tx): void {
+export function deleteStoredHash(localPath: string, dryRun: boolean, tx: Tx): void {
+  if (dryRun) return;
   tx.delete(fileHashes).where(eq(fileHashes.localPath, localPath)).run();
 }
 
@@ -44,7 +45,13 @@ export function deleteStoredHashesUnderPath(dirPath: string, tx: Tx): void {
 /**
  * Update the local path for a stored hash (used during rename/move).
  */
-export function updateStoredHashPath(oldLocalPath: string, newLocalPath: string, tx: Tx): void {
+export function updateStoredHashPath(
+  oldLocalPath: string,
+  newLocalPath: string,
+  dryRun: boolean,
+  tx: Tx
+): void {
+  if (dryRun) return;
   tx.update(fileHashes)
     .set({ localPath: newLocalPath, updatedAt: new Date() })
     .where(eq(fileHashes.localPath, oldLocalPath))
@@ -91,7 +98,8 @@ export function cleanupOrphanedHashes(tx: Tx): number {
  * Store or update the content hash for a file after successful sync.
  * Fails silently with a warning log if storage fails.
  */
-export function setFileHash(localPath: string, contentHash: string, tx: Tx): void {
+export function setFileHash(localPath: string, contentHash: string, dryRun: boolean, tx: Tx): void {
+  if (dryRun) return;
   try {
     tx.insert(fileHashes)
       .values({

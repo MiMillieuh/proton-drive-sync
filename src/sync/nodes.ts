@@ -50,8 +50,10 @@ export function setNodeMapping(
   nodeUid: string,
   parentNodeUid: string,
   isDirectory: boolean,
+  dryRun: boolean,
   tx: Tx
 ): void {
+  if (dryRun) return;
   tx.insert(nodeMapping)
     .values({
       localPath,
@@ -75,7 +77,8 @@ export function setNodeMapping(
 /**
  * Delete the node mapping for a local path.
  */
-export function deleteNodeMapping(localPath: string, tx: Tx): void {
+export function deleteNodeMapping(localPath: string, dryRun: boolean, tx: Tx): void {
+  if (dryRun) return;
   tx.delete(nodeMapping).where(eq(nodeMapping.localPath, localPath)).run();
 }
 
@@ -97,8 +100,10 @@ export function updateNodeMappingPath(
   oldLocalPath: string,
   newLocalPath: string,
   newParentNodeUid: string | undefined,
+  dryRun: boolean,
   tx: Tx
 ): void {
+  if (dryRun) return;
   const updateSet: { localPath: string; updatedAt: Date; parentNodeUid?: string } = {
     localPath: newLocalPath,
     updatedAt: new Date(),

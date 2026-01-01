@@ -155,8 +155,8 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
           dryRun,
           tx
         );
-        deleteStoredHash(from.localPath, tx);
-        deleteNodeMapping(from.localPath, tx);
+        deleteStoredHash(from.localPath, dryRun, tx);
+        deleteNodeMapping(from.localPath, dryRun, tx);
         if (!isFile) {
           deleteStoredHashesUnderPath(from.localPath, tx);
           deleteNodeMappingsUnderPath(from.localPath, tx);
@@ -206,8 +206,8 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
         tx
       );
 
-      deleteStoredHash(file.localPath, tx);
-      deleteNodeMapping(file.localPath, tx);
+      deleteStoredHash(file.localPath, dryRun, tx);
+      deleteNodeMapping(file.localPath, dryRun, tx);
       if (file.type === 'd') {
         deleteStoredHashesUnderPath(file.localPath, tx);
         deleteNodeMappingsUnderPath(file.localPath, tx);

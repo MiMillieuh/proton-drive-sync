@@ -183,12 +183,10 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         const { existed } = await deleteNodeOrThrow(client, remotePath, dryRun);
         logger.info(existed ? `Deleted: ${remotePath}` : `Already gone: ${remotePath}`);
         // Remove node mapping on delete
-        if (!dryRun) {
-          db.transaction((tx) => {
-            deleteNodeMapping(localPath, tx);
-            markJobSynced(id, localPath, dryRun, tx);
-          });
-        }
+        db.transaction((tx) => {
+          deleteNodeMapping(localPath, dryRun, tx);
+          markJobSynced(id, localPath, dryRun, tx);
+        });
         return;
       }
 
@@ -205,11 +203,9 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         logger.info(`Success: ${remotePath} -> ${nodeUid}`);
         // Store node mapping and content hash for future operations
         db.transaction((tx) => {
-          if (!dryRun) {
-            setNodeMapping(localPath, nodeUid, parentNodeUid, isDirectory, tx);
-            if (job.contentHash) {
-              setFileHash(localPath, job.contentHash, tx);
-            }
+          setNodeMapping(localPath, nodeUid, parentNodeUid, isDirectory, dryRun, tx);
+          if (job.contentHash) {
+            setFileHash(localPath, job.contentHash, dryRun, tx);
           }
           markJobSynced(id, localPath, dryRun, tx);
         });
@@ -233,10 +229,8 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
           throw new Error(result.error);
         }
         db.transaction((tx) => {
-          if (!dryRun) {
-            updateNodeMappingPath(oldLocalPath, localPath, undefined, tx);
-            updateStoredHashPath(oldLocalPath, localPath, tx);
-          }
+          updateNodeMappingPath(oldLocalPath, localPath, undefined, dryRun, tx);
+          updateStoredHashPath(oldLocalPath, localPath, dryRun, tx);
           markJobSynced(id, localPath, dryRun, tx);
         });
         logger.info(`Renamed: ${oldRemotePath} -> ${remotePath}`);
@@ -279,10 +273,8 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
           throw new Error(result.error);
         }
         db.transaction((tx) => {
-          if (!dryRun) {
-            updateNodeMappingPath(oldLocalPath, localPath, newParentNodeUid, tx);
-            updateStoredHashPath(oldLocalPath, localPath, tx);
-          }
+          updateNodeMappingPath(oldLocalPath, localPath, newParentNodeUid, dryRun, tx);
+          updateStoredHashPath(oldLocalPath, localPath, dryRun, tx);
           markJobSynced(id, localPath, dryRun, tx);
         });
         logger.info(`Moved: ${oldRemotePath} -> ${remotePath}`);
@@ -300,12 +292,10 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         await deleteNodeOrThrow(client, oldRemotePath, dryRun);
 
         // Step 2: Clean up old mappings
-        if (!dryRun) {
-          db.transaction((tx) => {
-            deleteNodeMapping(oldLocalPath, tx);
-            deleteStoredHash(oldLocalPath, tx);
-          });
-        }
+        db.transaction((tx) => {
+          deleteNodeMapping(oldLocalPath, dryRun, tx);
+          deleteStoredHash(oldLocalPath, dryRun, tx);
+        });
 
         // Step 3: Create at new path
         logger.info(`Delete+Create: creating ${remotePath}`);
@@ -318,11 +308,9 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
 
         // Step 4: Store new mappings
         db.transaction((tx) => {
-          if (!dryRun) {
-            setNodeMapping(localPath, nodeUid, parentNodeUid, isDirectory, tx);
-            if (job.contentHash) {
-              setFileHash(localPath, job.contentHash, tx);
-            }
+          setNodeMapping(localPath, nodeUid, parentNodeUid, isDirectory, dryRun, tx);
+          if (job.contentHash) {
+            setFileHash(localPath, job.contentHash, dryRun, tx);
           }
           markJobSynced(id, localPath, dryRun, tx);
         });
