@@ -63,6 +63,7 @@ import { AddDirectoryModal } from './views/fragments/AddDirectoryModal.js';
 import { NoSyncDirsModal } from './views/fragments/NoSyncDirsModal.js';
 import { StartOnLoginSection } from './views/fragments/StartOnLoginSection.js';
 import { WelcomeModal } from './views/fragments/WelcomeModal.js';
+import { icon } from './views/fragments/Icon.js';
 
 // Embed HTML templates at compile time as text (required for compiled binaries)
 import layoutHtml from './layout.html.txt';
@@ -132,14 +133,14 @@ export type DashboardSnapshot = {
   watchmanReady: boolean;
 };
 
-export function snapshot(limit = 50): DashboardSnapshot {
+export function snapshot(): DashboardSnapshot {
   return {
     counts: getJobCounts(),
     processing: getProcessingJobs(),
-    blocked: getBlockedJobs(limit),
-    pending: getPendingJobs(limit),
-    recent: getRecentJobs(limit),
-    retry: getRetryJobs(limit),
+    blocked: getBlockedJobs(),
+    pending: getPendingJobs(),
+    recent: getRecentJobs(),
+    retry: getRetryJobs(),
     auth: currentAuthStatus,
     syncStatus: currentSyncStatus,
     dryRun: isDryRun,
@@ -270,25 +271,25 @@ function renderAuthStatus(auth: AuthStatusUpdate): string {
   const statusConfig = {
     unauthenticated: {
       border: 'border-gray-500/30 bg-gray-500/10',
-      icon: `<i data-lucide="clock" class="h-3 w-3 text-gray-400"></i>`,
+      icon: icon('clock', 'h-3 w-3 text-gray-400'),
       text: 'text-gray-400',
       label: 'Not authenticated',
     },
     authenticating: {
       border: 'border-amber-500/30 bg-amber-500/10',
-      icon: `<i data-lucide="loader-circle" class="animate-spin h-3 w-3 text-amber-400"></i>`,
+      icon: icon('loader-circle', 'animate-spin h-3 w-3 text-amber-400'),
       text: 'text-amber-400',
       label: 'Authenticating...',
     },
     authenticated: {
       border: 'border-green-500/30 bg-green-500/10',
-      icon: `<i data-lucide="check" class="h-3 w-3 text-green-400"></i>`,
+      icon: icon('check', 'h-3 w-3 text-green-400'),
       text: 'text-green-400',
       label: '', // Set below after status check
     },
     failed: {
       border: 'border-red-500/30 bg-red-500/10',
-      icon: `<i data-lucide="x" class="h-3 w-3 text-red-400"></i>`,
+      icon: icon('x', 'h-3 w-3 text-red-400'),
       text: 'text-red-400',
       label: 'Auth Failed',
     },
@@ -322,7 +323,7 @@ function renderStopSection(syncStatus: string): string {
     <div class="flex items-center gap-3">
       <h3 class="text-lg font-semibold text-white">Shut Down</h3>
       <div class="relative group flex items-center">
-        <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
+        ${icon('info', 'w-4 h-4 text-gray-500 cursor-help')}
         <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
           You can start it again with <code class="bg-gray-800 px-1 py-0.5 rounded font-mono">proton-drive-sync start</code>
         </div>
@@ -335,7 +336,7 @@ function renderStopSection(syncStatus: string): string {
       id="stop-button"
       class="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      <i data-lucide="square" class="w-4 h-4"></i>
+      ${icon('square', 'w-4 h-4')}
       Stop
     </button>
   </div>
@@ -347,7 +348,7 @@ function renderPausedBadge(isPaused: boolean): string {
   if (!isPaused) return '';
   return `
 <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-amber-500/30 bg-amber-500/10">
-  <i data-lucide="circle-pause" class="h-3 w-3 text-amber-400"></i>
+  ${icon('circle-pause', 'h-3 w-3 text-amber-400')}
   <span class="text-xs font-medium text-amber-400">Paused</span>
 </div>`;
 }
@@ -401,7 +402,7 @@ function renderDryRunBanner(dryRun: boolean): string {
   return `
 <div class="bg-amber-500/90 text-amber-950 px-4 py-2.5 text-center font-medium text-sm shadow-lg">
   <div class="flex items-center justify-center gap-2">
-    <i data-lucide="triangle-alert" class="w-5 h-5"></i>
+    ${icon('triangle-alert', 'w-5 h-5')}
     <span>DRY-RUN MODE - No changes are being synced. Information shown may be incorrect.</span>
   </div>
 </div>`;
@@ -414,7 +415,7 @@ function renderProcessingTitle(isPaused: boolean): string {
 <span class="w-2 h-2 rounded-full bg-amber-500"></span>
 Held Transfers
 <div class="relative group">
-  <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
+  ${icon('info', 'w-4 h-4 text-gray-500 cursor-help')}
   <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-80 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 normal-case font-normal">
     Transfers are held until you authenticate and syncing starts
   </div>
@@ -489,7 +490,7 @@ function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
             <div class="flex items-center gap-1 mb-1">
               <label class="block text-xs text-gray-500">Remote Root</label>
               <div class="relative group">
-                <i data-lucide="info" class="w-3 h-3 text-gray-500 cursor-help"></i>
+                ${icon('info', 'w-3 h-3 text-gray-500 cursor-help')}
                 <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
                   The destination folder in Proton Drive. Must start with / indicating the base of the Proton Drive filesystem.
                 </div>
@@ -509,7 +510,7 @@ function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
           class="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
           title="Remove directory"
         >
-          <i data-lucide="trash-2" class="w-5 h-5"></i>
+          ${icon('trash-2', 'w-5 h-5')}
         </button>
       </div>
     `
@@ -536,14 +537,14 @@ function renderConfigInfo(config: Config | null): string {
       return `
     <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md shadow-sm group hover:border-gray-600 transition-colors">
       <div class="flex items-center gap-2">
-        <i data-lucide="folder" class="w-3.5 h-3.5 text-gray-500 shrink-0"></i>
+        ${icon('folder', 'w-3.5 h-3.5 text-gray-500 shrink-0')}
         <span class="font-mono text-xs text-gray-300">${escapeHtml(dir.source_path)}</span>
       </div>
       
-      <i data-lucide="arrow-right" class="w-3 h-3 text-gray-600 shrink-0"></i>
+      ${icon('arrow-right', 'w-3 h-3 text-gray-600 shrink-0')}
 
       <div class="flex items-center gap-2">
-        <i data-lucide="cloud" class="w-3.5 h-3.5 text-indigo-400 shrink-0"></i>
+        ${icon('cloud', 'w-3.5 h-3.5 text-indigo-400 shrink-0')}
         <span class="font-mono text-xs text-indigo-300">${escapeHtml(remotePath)}</span>
       </div>
     </div>`;
@@ -613,7 +614,9 @@ function controlsScriptsWithValues(
   return controlsScriptsHtml
     .replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl)
     .replace('{{SYNC_DIRS_JSON}}', JSON.stringify(syncDirs))
-    .replace('{{SYNC_CONCURRENCY}}', String(syncConcurrency));
+    .replace('{{SYNC_CONCURRENCY}}', String(syncConcurrency))
+    .replace('{{ICON_INFO_SMALL}}', icon('info', 'w-3 h-3 text-gray-500 cursor-help').toString())
+    .replace('{{ICON_TRASH}}', icon('trash-2', 'w-5 h-5').toString());
 }
 
 /**
@@ -649,19 +652,29 @@ async function composePage(
   const syncingStatusContent = renderSyncingBadge(s.syncStatus);
   const dryRunBannerContent = renderDryRunBanner(s.dryRun);
 
-  return layoutHtml
-    .replace('{{TITLE}}', options.title)
-    .replace('{{HOME_TAB_CLASS}}', homeTabClass)
-    .replace('{{CONTROLS_TAB_CLASS}}', controlsTabClass)
-    .replace('{{ABOUT_TAB_CLASS}}', aboutTabClass)
-    .replaceAll('{{HIDE_TABS_DURING_ONBOARDING}}', hideTabsDuringOnboarding ? 'hidden' : '')
-    .replace('{{HIDE_BADGES}}', options.activeTab === 'about' ? 'hidden' : '')
-    .replace('{{AUTH_STATUS_CONTENT}}', authStatusContent)
-    .replace('{{SYNCING_STATUS_CONTENT}}', syncingStatusContent)
-    .replace('{{DRY_RUN_BANNER_CONTENT}}', dryRunBannerContent)
-    .replace('{{CONTENT}}', contentHtml)
-    .replace('{{LAYOUT_SCRIPTS}}', layoutScriptsHtml)
-    .replace('{{PAGE_SCRIPTS}}', options.pageScripts);
+  return (
+    layoutHtml
+      .replace('{{TITLE}}', options.title)
+      .replace('{{HOME_TAB_CLASS}}', homeTabClass)
+      .replace('{{CONTROLS_TAB_CLASS}}', controlsTabClass)
+      .replace('{{ABOUT_TAB_CLASS}}', aboutTabClass)
+      .replaceAll('{{HIDE_TABS_DURING_ONBOARDING}}', hideTabsDuringOnboarding ? 'hidden' : '')
+      .replace('{{HIDE_BADGES}}', options.activeTab === 'about' ? 'hidden' : '')
+      .replace('{{AUTH_STATUS_CONTENT}}', authStatusContent)
+      .replace('{{SYNCING_STATUS_CONTENT}}', syncingStatusContent)
+      .replace('{{DRY_RUN_BANNER_CONTENT}}', dryRunBannerContent)
+      .replace('{{CONTENT}}', contentHtml)
+      .replace('{{LAYOUT_SCRIPTS}}', layoutScriptsHtml)
+      .replace('{{PAGE_SCRIPTS}}', options.pageScripts)
+      // Replace icon placeholders with server-rendered SVGs
+      .replace('{{ICON_HOUSE}}', icon('house', 'w-4 h-4 shrink-0').toString())
+      .replace('{{ICON_SLIDERS}}', icon('sliders-horizontal', 'w-4 h-4 shrink-0').toString())
+      .replace('{{ICON_COMPASS}}', icon('compass', 'w-4 h-4 shrink-0').toString())
+      .replaceAll(
+        '{{ICON_STAR}}',
+        icon('star', 'icon-star w-4 h-4 text-white transition-colors fill-current').toString()
+      )
+  );
 }
 
 // Use embedded layout template
@@ -687,7 +700,15 @@ app.get('/', async (c) => {
     .replace('{{PROCESSING_QUEUE_CONTENT}}', renderFragment(FRAG.processingQueue, s))
     .replace('{{RECENT_QUEUE_CONTENT}}', renderFragment(FRAG.recentQueue, s))
     .replace('{{RETRY_QUEUE_CONTENT}}', renderFragment(FRAG.retryQueue, s))
-    .replace('{{BLOCKED_QUEUE_CONTENT}}', renderFragment(FRAG.blockedQueue, s));
+    .replace('{{BLOCKED_QUEUE_CONTENT}}', renderFragment(FRAG.blockedQueue, s))
+    // Replace icon placeholders
+    .replace('{{ICON_ALIGN_LEFT}}', icon('align-left', 'w-4 h-4 text-gray-400').toString())
+    .replace(
+      '{{ICON_CHEVRON_RIGHT}}',
+      icon('chevron-right', 'w-4 h-4 text-gray-500 transition-transform duration-200', undefined)
+        .toString()
+        .replace('<svg', '<svg id="logs-chevron"')
+    );
 
   const html = await composePage(layout, homeContent, {
     title: 'Proton Drive Sync',
@@ -723,7 +744,11 @@ app.get('/controls', async (c) => {
 
   content = content
     .replace(/\{\{SYNC_CONCURRENCY\}\}/g, String(syncConcurrency))
-    .replace('{{SYNC_DIRS_HTML}}', syncDirsHtml);
+    .replace('{{SYNC_DIRS_HTML}}', syncDirsHtml)
+    // Replace icon placeholders
+    .replace('{{ICON_INFO}}', icon('info', 'w-4 h-4 text-gray-500 cursor-help').toString())
+    .replace('{{ICON_PLUS}}', icon('plus', 'w-4 h-4').toString())
+    .replace('{{ICON_ARROW_RIGHT}}', icon('arrow-right', 'w-4 h-4').toString());
 
   // Show/hide "no dirs" message based on whether we have sync dirs
   content = content.replace(
@@ -762,6 +787,11 @@ app.get('/about', async (c) => {
   // Show button only in 'about' state (just arrived from controls)
   const showStartButton = onboardingState === ONBOARDING_STATE.ABOUT;
   content = content.replace('{{HIDE_START_BUTTON}}', showStartButton ? '' : 'hidden');
+
+  // Replace icon placeholders
+  content = content
+    .replace('{{ICON_HEART}}', icon('heart', 'w-4 h-4 text-gray-500').toString())
+    .replace('{{ICON_ROCKET}}', icon('rocket', 'w-4 h-4 ml-1').toString());
 
   const html = await composePage(layout, content, {
     title: 'About - Proton Drive Sync',
@@ -804,8 +834,7 @@ app.get('/favicon.ico', (c) => {
 // One generic endpoint serves all fragments (e.g., hx-get="/api/fragments/stats")
 app.get('/api/fragments/:key', (c) => {
   const key = c.req.param('key') as FragmentKey;
-  const limit = parseInt(c.req.query('limit') || '50', 10);
-  const s = snapshot(limit);
+  const s = snapshot();
   return c.html(renderFragment(key, s));
 });
 
@@ -902,14 +931,7 @@ app.post('/api/signal/:signal', (c) => {
 
   if (signal === 'retry-all-now') {
     retryAllNow();
-    // Re-render the retry list (now empty) and pending list (now has the jobs)
-    stateDiffEvents.emit('job_state_diff', {
-      pending: getPendingJobs(50),
-      processing: [],
-      synced: [],
-      blocked: [],
-      retry: getRetryJobs(50),
-    });
+    // Force a full refresh of UI state (retry-all-now moves jobs between queues)
     const s = snapshot();
     return c.html(renderRetryQueue(s.retry, s.counts.retry));
   }
@@ -941,8 +963,7 @@ app.get('/api/stats', (c) => {
 });
 
 app.get('/api/jobs/recent', (c) => {
-  const limit = parseInt(c.req.query('limit') || '50', 10);
-  return c.json(getRecentJobs(limit));
+  return c.json(getRecentJobs());
 });
 
 app.get('/api/jobs/blocked', (c) => {
@@ -1106,6 +1127,14 @@ app.get('/api/events', async (c) => {
     const initialSnapshot = snapshot();
     cachedCounts = { ...initialSnapshot.counts }; // Cache initial counts from DB
     lastProcessing = processingIds(initialSnapshot.processing);
+
+    // In-memory job lists - initialized from snapshot, updated via diffs
+    let cachedProcessing = [...initialSnapshot.processing];
+    let cachedBlocked = [...initialSnapshot.blocked];
+    let cachedPending = [...initialSnapshot.pending];
+    let cachedRecent = [...initialSnapshot.recent];
+    let cachedRetry = [...initialSnapshot.retry];
+
     pushFragments(stream, initialSnapshot, [
       FRAG.stats,
       FRAG.auth,
@@ -1125,35 +1154,34 @@ app.get('/api/events', async (c) => {
       FRAG.welcomeModal,
     ]);
 
-    // Job diff: apply deltas to cached counts and push updated fragments
-    const onJobDiff = (diff: DashboardDiff) => {
-      // Apply deltas to cached counts (avoid DB query for counts)
-      if (cachedCounts) {
-        cachedCounts.pending += diff.statsDelta.pending;
-        cachedCounts.processing += diff.statsDelta.processing;
-        cachedCounts.synced += diff.statsDelta.synced;
-        cachedCounts.blocked += diff.statsDelta.blocked;
-        cachedCounts.retry += diff.statsDelta.retry;
-        // Derive pendingReady from pending - retry
-        cachedCounts.pendingReady = cachedCounts.pending - cachedCounts.retry;
+    // Helper to apply list diffs (add items, remove by id)
+    const applyListDiff = (
+      list: DashboardJob[],
+      add: DashboardJob[],
+      removeIds: number[]
+    ): DashboardJob[] => {
+      // Remove items by id
+      const removeSet = new Set(removeIds);
+      const filtered = list.filter((job) => !removeSet.has(job.id));
+      // Add new items
+      return [...filtered, ...add];
+    };
 
-        // Ensure non-negative values
-        cachedCounts.pending = Math.max(0, cachedCounts.pending);
-        cachedCounts.pendingReady = Math.max(0, cachedCounts.pendingReady);
-        cachedCounts.processing = Math.max(0, cachedCounts.processing);
-        cachedCounts.synced = Math.max(0, cachedCounts.synced);
-        cachedCounts.blocked = Math.max(0, cachedCounts.blocked);
-        cachedCounts.retry = Math.max(0, cachedCounts.retry);
-      }
+    // Debounce pushing fragments to the SSE stream
+    const FRAGMENT_DEBOUNCE_MS = 100;
+    let fragmentDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-      // Build snapshot with cached counts (still need job lists from DB)
+    const flushFragments = () => {
+      fragmentDebounceTimer = null;
+
+      // Build snapshot with cached counts and lists (no DB queries)
       const s: DashboardSnapshot = {
         counts: cachedCounts || getJobCounts(),
-        processing: getProcessingJobs(),
-        blocked: getBlockedJobs(50),
-        pending: getPendingJobs(50),
-        recent: getRecentJobs(50),
-        retry: getRetryJobs(50),
+        processing: cachedProcessing,
+        blocked: cachedBlocked,
+        pending: cachedPending,
+        recent: cachedRecent,
+        retry: cachedRetry,
         auth: currentAuthStatus,
         syncStatus: currentSyncStatus,
         dryRun: isDryRun,
@@ -1175,6 +1203,40 @@ app.get('/api/events', async (c) => {
       if (curProcessing !== lastProcessing) {
         lastProcessing = curProcessing;
         pushFragments(stream, s, [FRAG.processingQueue]);
+      }
+    };
+
+    // Job diff: apply deltas to cached counts and lists, debounce fragment push
+    const onJobDiff = (diff: DashboardDiff) => {
+      // Apply deltas to cached counts (avoid DB query for counts)
+      if (cachedCounts) {
+        cachedCounts.pending += diff.statsDelta.pending;
+        cachedCounts.processing += diff.statsDelta.processing;
+        cachedCounts.synced += diff.statsDelta.synced;
+        cachedCounts.blocked += diff.statsDelta.blocked;
+        cachedCounts.retry += diff.statsDelta.retry;
+        // Derive pendingReady from pending - retry
+        cachedCounts.pendingReady = cachedCounts.pending - cachedCounts.retry;
+
+        // Ensure non-negative values
+        cachedCounts.pending = Math.max(0, cachedCounts.pending);
+        cachedCounts.pendingReady = Math.max(0, cachedCounts.pendingReady);
+        cachedCounts.processing = Math.max(0, cachedCounts.processing);
+        cachedCounts.synced = Math.max(0, cachedCounts.synced);
+        cachedCounts.blocked = Math.max(0, cachedCounts.blocked);
+        cachedCounts.retry = Math.max(0, cachedCounts.retry);
+      }
+
+      // Apply diffs to in-memory job lists
+      cachedProcessing = applyListDiff(cachedProcessing, diff.addProcessing, diff.removeProcessing);
+      cachedBlocked = [...cachedBlocked, ...diff.addBlocked]; // append-only
+      cachedPending = applyListDiff(cachedPending, diff.addPending, diff.removePending);
+      cachedRecent = [...cachedRecent, ...diff.addRecent]; // append-only
+      cachedRetry = applyListDiff(cachedRetry, diff.addRetry, diff.removeRetry);
+
+      // Debounce the fragment push
+      if (!fragmentDebounceTimer) {
+        fragmentDebounceTimer = setTimeout(flushFragments, FRAGMENT_DEBOUNCE_MS);
       }
     };
 
@@ -1208,6 +1270,7 @@ app.get('/api/events', async (c) => {
     heartbeatEvents.on('heartbeat', onHeartbeat);
 
     stream.onAbort(() => {
+      if (fragmentDebounceTimer) clearTimeout(fragmentDebounceTimer);
       stateDiffEvents.off('job_state_diff', onJobDiff);
       statusEvents.off('status', onStatus);
       heartbeatEvents.off('heartbeat', onHeartbeat);
@@ -1245,7 +1308,7 @@ app.get('/api/logs', async (c) => {
 
         const rl = createInterface({ input: readStream });
 
-        // Collect lines first if initial load (to limit count)
+        // Collect lines first if initial load (to limit count and batch into single SSE event)
         if (isInitialLoad) {
           const lines: string[] = [];
           for await (const line of rl) {
@@ -1253,17 +1316,21 @@ app.get('/api/logs', async (c) => {
               lines.push(line);
             }
           }
-          // Only send the last MAX_INITIAL_LOG_LINES
+          // Only send the last MAX_INITIAL_LOG_LINES, batched into a single SSE event
           const startIndex = Math.max(0, lines.length - MAX_INITIAL_LOG_LINES);
-          for (let i = startIndex; i < lines.length; i++) {
+          const batchedHtml = lines
+            .slice(startIndex)
+            .map((line) => renderLogLine(line))
+            .join('');
+          if (batchedHtml) {
             await stream.writeSSE({
               event: 'log',
-              data: renderLogLine(lines[i]),
+              data: batchedHtml,
             });
           }
           isInitialLoad = false;
         } else {
-          // Stream new lines directly
+          // Stream new lines directly (one at a time is fine for incremental updates)
           for await (const line of rl) {
             if (line.trim()) {
               await stream.writeSSE({

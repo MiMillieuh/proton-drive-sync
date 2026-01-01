@@ -1,6 +1,7 @@
 import type { FC } from 'hono/jsx';
 import type { DashboardJob } from './types.js';
 import { formatPath } from './utils.js';
+import { Icon } from './Icon.js';
 
 type Props = {
   jobs: DashboardJob[];
@@ -32,7 +33,7 @@ export const PendingQueue: FC<Props> = ({ jobs, count }) => {
           <div class="space-y-1">
             {jobs.map((job) => (
               <div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
-                <i data-lucide="clock" class="w-4 h-4 text-amber-500 shrink-0"></i>
+                <Icon name="clock" class="w-4 h-4 text-amber-500 shrink-0" />
                 <div class="min-w-0 flex-1">
                   <span class="text-xs font-mono text-gray-300 truncate block">
                     {formatPath(job.localPath)}

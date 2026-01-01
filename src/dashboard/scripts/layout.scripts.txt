@@ -81,6 +81,7 @@
   (function () {
     let rotation = 0;
     let lastTime = performance.now();
+    let frameCount = 0;
     const ROTATION_SPEED = 360; // degrees per second
 
     function updateSpinners(currentTime) {
@@ -92,19 +93,12 @@
         el.style.transform = `rotate(${rotation}deg)`;
       });
 
+      frameCount++;
       requestAnimationFrame(updateSpinners);
     }
 
     requestAnimationFrame(updateSpinners);
   })();
-
-  // Initialize Lucide icons
-  lucide.createIcons();
-
-  // Reinitialize Lucide icons after HTMX swaps in new content
-  document.body.addEventListener('htmx:afterSwap', () => {
-    lucide.createIcons();
-  });
 
   // Listen for showToast events triggered by HX-Trigger headers
   document.body.addEventListener('showToast', (e) => {

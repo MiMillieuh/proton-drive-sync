@@ -1,4 +1,5 @@
 import type { FC } from 'hono/jsx';
+import { Icon } from './Icon.js';
 
 interface NoSyncDirsModalProps {
   redirectUrl?: string;
@@ -18,7 +19,7 @@ export const NoSyncDirsModal: FC<NoSyncDirsModalProps> = ({ redirectUrl }) => {
       <div class="relative bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-md shadow-xl">
         <div class="flex items-center gap-3 mb-4">
           <div class="flex items-center justify-center w-10 h-10 bg-yellow-500/20 rounded-full">
-            <i data-lucide="alert-triangle" class="w-5 h-5 text-yellow-500"></i>
+            <Icon name="alert-triangle" class="w-5 h-5 text-yellow-500" />
           </div>
           <h3 class="text-lg font-semibold text-white">No Sync Directories</h3>
         </div>

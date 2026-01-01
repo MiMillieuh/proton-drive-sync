@@ -1,4 +1,5 @@
 import type { FC } from 'hono/jsx';
+import { Icon } from './Icon.js';
 
 export const AddDirectoryModal: FC = () => {
   return (
@@ -36,7 +37,7 @@ export const AddDirectoryModal: FC = () => {
             <div class="flex items-center gap-1 mb-1">
               <label class="block text-xs text-gray-500">Remote Root</label>
               <div class="relative group">
-                <i data-lucide="info" class="w-3 h-3 text-gray-500 cursor-help"></i>
+                <Icon name="info" class="w-3 h-3 text-gray-500 cursor-help" />
                 <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
                   The destination folder in Proton Drive. Must start with / indicating the base of
                   the Proton Drive filesystem.

@@ -18,7 +18,6 @@ import {
   type ParentMessage,
   type ChildMessage,
   createEmptyDiff,
-  hasDiffChanges,
   parseMessage,
 } from './ipc.js';
 
@@ -36,15 +35,12 @@ export type {
 // Constants
 // ============================================================================
 
-// Accumulate diffs for this interval before sending to child
-const DIFF_ACCUMULATE_MS = 100;
-
 // ============================================================================
 // Event Accumulation
 // ============================================================================
 
 /**
- * Accumulate a job event into the current diff.
+ * Accumulate a job event into a diff.
  *
  * Event types and their effects on stats:
  * - enqueue: pending++ (job added to queue)
@@ -53,7 +49,7 @@ const DIFF_ACCUMULATE_MS = 100;
  * - blocked: processing--, blocked++ (job failed permanently)
  * - retry: processing--, pending++ (job scheduled for retry)
  */
-function accumulateEvent(event: JobEvent): void {
+function accumulateEventIntoDiff(event: JobEvent, diff: DashboardDiff): void {
   const job: DashboardJob = {
     id: event.jobId,
     localPath: event.localPath,
@@ -63,40 +59,47 @@ function accumulateEvent(event: JobEvent): void {
 
   switch (event.type) {
     case 'enqueue':
-      accumulatedDiff.statsDelta.pending++;
+      diff.statsDelta.pending++;
+      diff.addPending.push(job);
       break;
 
     case 'processing':
-      accumulatedDiff.statsDelta.pending--;
-      accumulatedDiff.statsDelta.processing++;
+      diff.statsDelta.pending--;
+      diff.statsDelta.processing++;
       if (event.wasRetry) {
-        accumulatedDiff.statsDelta.retry--;
+        diff.statsDelta.retry--;
+        diff.removeRetry.push(event.jobId);
       }
-      accumulatedDiff.addProcessing.push(job);
+      diff.removePending.push(event.jobId);
+      diff.addProcessing.push(job);
       break;
 
     case 'synced':
-      accumulatedDiff.statsDelta.processing--;
-      accumulatedDiff.statsDelta.synced++;
-      accumulatedDiff.removeProcessing.push(event.jobId);
-      accumulatedDiff.addRecent.push(job);
+      diff.statsDelta.processing--;
+      diff.statsDelta.synced++;
+      diff.removeProcessing.push(event.jobId);
+      diff.addRecent.push(job);
       break;
 
     case 'blocked':
-      accumulatedDiff.statsDelta.processing--;
-      accumulatedDiff.statsDelta.blocked++;
-      accumulatedDiff.removeProcessing.push(event.jobId);
-      accumulatedDiff.addBlocked.push({
+      diff.statsDelta.processing--;
+      diff.statsDelta.blocked++;
+      diff.removeProcessing.push(event.jobId);
+      diff.addBlocked.push({
         ...job,
         lastError: event.error,
       });
       break;
 
     case 'retry':
-      accumulatedDiff.statsDelta.processing--;
-      accumulatedDiff.statsDelta.pending++;
-      accumulatedDiff.statsDelta.retry++;
-      accumulatedDiff.removeProcessing.push(event.jobId);
+      diff.statsDelta.processing--;
+      diff.statsDelta.pending++;
+      diff.statsDelta.retry++;
+      diff.removeProcessing.push(event.jobId);
+      diff.addRetry.push({
+        ...job,
+        retryAt: event.retryAt,
+      });
       break;
   }
 }
@@ -110,8 +113,6 @@ type DashboardSubprocess = Subprocess<'pipe', 'pipe', 'inherit'>;
 
 let dashboardProcess: DashboardSubprocess | null = null;
 let jobEventHandler: ((event: JobEvent) => void) | null = null;
-let accumulatedDiff: DashboardDiff = createEmptyDiff();
-let diffTimeout: ReturnType<typeof setTimeout> | null = null;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let currentAuthStatus: AuthStatusUpdate = { status: 'unauthenticated' };
 let lastSentStatus: DashboardStatus | null = null;
@@ -239,23 +240,14 @@ export function startDashboard(config: Config, dryRun = false): void {
   // Send initial config
   sendToChild({ type: 'config', config, dryRun });
 
-  // Forward job events to child process via stdin (accumulated into diffs)
+  // Forward job events to child process via stdin immediately
+  // Child process handles debouncing before pushing to browser
   jobEventHandler = (event: JobEvent) => {
     if (!dashboardProcess) return;
 
-    // Accumulate the event into the diff based on event type
-    accumulateEvent(event);
-
-    // Schedule sending the diff if not already scheduled
-    if (!diffTimeout) {
-      diffTimeout = setTimeout(() => {
-        diffTimeout = null;
-        if (dashboardProcess && hasDiffChanges(accumulatedDiff)) {
-          sendToChild({ type: 'job_state_diff', diff: accumulatedDiff });
-          accumulatedDiff = createEmptyDiff();
-        }
-      }, DIFF_ACCUMULATE_MS);
-    }
+    const diff = createEmptyDiff();
+    accumulateEventIntoDiff(event, diff);
+    sendToChild({ type: 'job_state_diff', diff });
   };
   jobEvents.on('job', jobEventHandler);
 }

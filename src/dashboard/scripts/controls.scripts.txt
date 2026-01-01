@@ -3,10 +3,9 @@
   let originalConfig = { sync_concurrency: {{SYNC_CONCURRENCY}}, sync_dirs: syncDirs };
   const redirectAfterSave = '{{REDIRECT_AFTER_SAVE}}';
 
-  // Re-initialize Lucide icons after HTMX swaps
-  document.body.addEventListener('htmx:afterSwap', function() {
-    lucide.createIcons();
-  });
+  // Icons rendered server-side (using backticks to allow single quotes in SVG attributes)
+  const ICON_INFO = `{{ICON_INFO_SMALL}}`;
+  const ICON_TRASH = `{{ICON_TRASH}}`;
 
   function renderSyncDirs() {
     const container = document.getElementById('sync-dirs-list');
@@ -38,7 +37,7 @@
             <div class="flex items-center gap-1 mb-1">
               <label class="block text-xs text-gray-500">Remote Root</label>
               <div class="relative group">
-                <i data-lucide="info" class="w-3 h-3 text-gray-500 cursor-help"></i>
+                                ${ICON_INFO}
                 <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
                   The destination folder in Proton Drive. Must start with / indicating the base of the Proton Drive filesystem.
                 </div>
@@ -58,15 +57,12 @@
           class="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
           title="Remove directory"
         >
-          <i data-lucide="trash-2" class="w-5 h-5"></i>
+                    ${ICON_TRASH}
         </button>
       </div>
     `
       )
       .join('');
-
-    // Re-initialize Lucide icons for dynamically added content
-    lucide.createIcons();
   }
 
   async function removeSyncDir(index) {
@@ -79,7 +75,6 @@
       const modalResponse = await fetch('/api/modal/no-sync-dirs?redirect=' + encodeURIComponent(redirectAfterSave || ''));
       const modalHtml = await modalResponse.text();
       document.body.insertAdjacentHTML('beforeend', modalHtml);
-      lucide.createIcons();
     }
   }
 
@@ -148,18 +143,12 @@
     if (syncDirs.length > 0) {
       noMessage.classList.add('hidden');
     }
-    lucide.createIcons();
   });
 
   // Listen for close-modal event from HTMX
   document.body.addEventListener('close-modal', function () {
     const modal = document.getElementById('add-dir-modal');
     if (modal) modal.remove();
-  });
-
-  // Re-initialize Lucide icons after any htmx swap
-  document.body.addEventListener('htmx:afterSwap', function () {
-    lucide.createIcons();
   });
 
   // Toggle service with smooth animation before server swap
@@ -194,7 +183,6 @@
       if (response.ok) {
         const html = await response.text();
         section.outerHTML = html;
-        lucide.createIcons();
       } else {
         // Revert on error
         revertToggle(button, knob, isCurrentlyEnabled);

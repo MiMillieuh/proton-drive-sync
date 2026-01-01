@@ -3,6 +3,7 @@ import { raw } from 'hono/html';
 import type { DashboardJob, SyncStatus, AuthStatusUpdate } from './types.js';
 import { PauseButton } from './PauseButton.js';
 import { formatPath } from './utils.js';
+import { Icon } from './Icon.js';
 
 type Props = {
   jobs: DashboardJob[];
@@ -40,7 +41,7 @@ export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus
       <div class="flex-1 overflow-y-auto custom-scrollbar p-2">
         {jobs.length === 0 ? (
           <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-            <i data-lucide="zap" class="w-10 h-10 opacity-20"></i>
+            <Icon name="zap" class="w-10 h-10 opacity-20" />
             <p class="text-sm">Queue is empty</p>
           </div>
         ) : (
@@ -49,12 +50,9 @@ export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus
               <div class="px-3 py-2.5 rounded-lg bg-gray-900/50 border border-gray-700/50 hover:border-blue-500/30 transition-colors group">
                 <div class="flex items-start gap-3">
                   {isActive ? (
-                    <i
-                      data-lucide="refresh-cw"
-                      class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 js-spin"
-                    ></i>
+                    <Icon name="refresh-cw" class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 js-spin" />
                   ) : (
-                    <i data-lucide="clock" class="w-4 h-4 text-amber-500 mt-0.5 shrink-0"></i>
+                    <Icon name="clock" class="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
                   )}
                   <div class="min-w-0 flex-1">
                     <div class="text-xs font-mono text-gray-300 truncate">

@@ -31,7 +31,7 @@
         <div class="flex items-center gap-2 mb-4">
           <h3 class="text-lg font-semibold text-white">Sync Concurrency</h3>
           <div class="relative group">
-            <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
+            {{ICON_INFO}}
             <div
               class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10"
             >
@@ -65,7 +65,7 @@
             hx-swap="beforeend"
             class="flex items-center gap-2 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
           >
-            <i data-lucide="plus" class="w-4 h-4"></i>
+            {{ICON_PLUS}}
             Add Directory
           </button>
         </div>
@@ -88,7 +88,7 @@
           class="flex items-center gap-1 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
         >
           Next
-          <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          {{ICON_ARROW_RIGHT}}
         </button>
       </div>
     </div>

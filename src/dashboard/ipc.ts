@@ -58,6 +58,14 @@ export interface DashboardDiff {
   addRecent: DashboardJob[];
   /** Jobs to add to the blocked list */
   addBlocked: DashboardJob[];
+  /** Jobs to add to the pending list */
+  addPending: DashboardJob[];
+  /** Job IDs to remove from the pending list */
+  removePending: number[];
+  /** Jobs to add to the retry list */
+  addRetry: DashboardJob[];
+  /** Job IDs to remove from the retry list */
+  removeRetry: number[];
 }
 
 // ============================================================================
@@ -131,6 +139,10 @@ export function createEmptyDiff(): DashboardDiff {
     removeProcessing: [],
     addRecent: [],
     addBlocked: [],
+    addPending: [],
+    removePending: [],
+    addRetry: [],
+    removeRetry: [],
   };
 }
 
@@ -145,7 +157,11 @@ export function hasDiffChanges(diff: DashboardDiff): boolean {
     diff.addProcessing.length > 0 ||
     diff.removeProcessing.length > 0 ||
     diff.addRecent.length > 0 ||
-    diff.addBlocked.length > 0
+    diff.addBlocked.length > 0 ||
+    diff.addPending.length > 0 ||
+    diff.removePending.length > 0 ||
+    diff.addRetry.length > 0 ||
+    diff.removeRetry.length > 0
   );
 }
 

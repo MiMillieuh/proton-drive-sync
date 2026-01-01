@@ -1,5 +1,6 @@
 import type { FC } from 'hono/jsx';
 import type { SyncStatus } from './types.js';
+import { Icon } from './Icon.js';
 
 type Props = {
   syncStatus: SyncStatus;
@@ -12,7 +13,12 @@ type Props = {
 export const ControlsPauseButton: FC<Props> = ({ syncStatus }) => {
   if (syncStatus === 'disconnected') {
     return (
-      <div id="controls-pause-button" hx-swap-oob="true" sse-swap="controls-pause-button"></div>
+      <div
+        id="controls-pause-button"
+        hx-swap-oob="true"
+        hx-swap="outerHTML"
+        sse-swap="controls-pause-button"
+      ></div>
     );
   }
 
@@ -21,6 +27,7 @@ export const ControlsPauseButton: FC<Props> = ({ syncStatus }) => {
       <div
         id="controls-pause-button"
         hx-swap-oob="true"
+        hx-swap="outerHTML"
         sse-swap="controls-pause-button"
         class="bg-gray-800 rounded-xl border border-gray-700 p-6 h-[88px]"
       >
@@ -32,7 +39,7 @@ export const ControlsPauseButton: FC<Props> = ({ syncStatus }) => {
             hx-swap="outerHTML"
             class="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors cursor-pointer"
           >
-            <i data-lucide="play" class="w-4 h-4"></i>
+            <Icon name="play" class="w-4 h-4" />
             Resume
           </button>
         </div>
@@ -45,6 +52,7 @@ export const ControlsPauseButton: FC<Props> = ({ syncStatus }) => {
     <div
       id="controls-pause-button"
       hx-swap-oob="true"
+      hx-swap="outerHTML"
       sse-swap="controls-pause-button"
       class="bg-gray-800 rounded-xl border border-gray-700 p-6 h-[88px]"
     >
@@ -56,7 +64,7 @@ export const ControlsPauseButton: FC<Props> = ({ syncStatus }) => {
           hx-swap="outerHTML"
           class="flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white text-sm font-medium rounded-lg border border-gray-500 transition-colors cursor-pointer"
         >
-          <i data-lucide="pause" class="w-4 h-4"></i>
+          <Icon name="pause" class="w-4 h-4" />
           Pause
         </button>
       </div>

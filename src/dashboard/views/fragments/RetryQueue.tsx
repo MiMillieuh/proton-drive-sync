@@ -1,6 +1,7 @@
 import type { FC } from 'hono/jsx';
 import type { DashboardJob } from './types.js';
 import { formatPath } from './utils.js';
+import { Icon } from './Icon.js';
 
 type Props = {
   jobs: DashboardJob[];
@@ -24,7 +25,7 @@ export const RetryQueue: FC<Props> = ({ jobs, count }) => {
               hx-swap="innerHTML"
               class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-orange-500/30 hover:border-orange-500/50 hover:bg-orange-500/10 transition-colors cursor-pointer"
             >
-              <i data-lucide="refresh-cw" class="h-3 w-3 text-orange-400"></i>
+              <Icon name="refresh-cw" class="h-3 w-3 text-orange-400" />
               <span class="text-xs font-medium text-orange-400">Retry All Now</span>
             </button>
           ) : (
@@ -38,7 +39,7 @@ export const RetryQueue: FC<Props> = ({ jobs, count }) => {
       <div class="flex-1 overflow-y-auto custom-scrollbar p-2">
         {jobs.length === 0 ? (
           <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-            <i data-lucide="circle-check" class="w-10 h-10 opacity-20"></i>
+            <Icon name="circle-check" class="w-10 h-10 opacity-20" />
             <p class="text-sm">No scheduled retries</p>
           </div>
         ) : (
@@ -51,7 +52,7 @@ export const RetryQueue: FC<Props> = ({ jobs, count }) => {
                 : '';
               return (
                 <div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
-                  <i data-lucide="refresh-cw" class="w-4 h-4 text-orange-500 shrink-0"></i>
+                  <Icon name="refresh-cw" class="w-4 h-4 text-orange-500 shrink-0" />
                   <div class="min-w-0 flex-1 flex items-center justify-between gap-4">
                     <span class="text-xs font-mono text-gray-300 truncate">
                       {formatPath(job.localPath)}

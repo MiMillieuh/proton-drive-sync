@@ -81,13 +81,9 @@
         onclick="toggleLogs()"
         class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2 cursor-pointer hover:text-white transition-colors"
       >
-        <i data-lucide="align-left" class="w-4 h-4 text-gray-400"></i>
+        {{ICON_ALIGN_LEFT}}
         Live Logs
-        <i
-          id="logs-chevron"
-          data-lucide="chevron-right"
-          class="w-4 h-4 text-gray-500 transition-transform duration-200"
-        ></i>
+        {{ICON_CHEVRON_RIGHT}}
       </button>
       <div id="logs-controls" class="hidden flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>

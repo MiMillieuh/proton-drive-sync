@@ -1,4 +1,5 @@
 import type { FC } from 'hono/jsx';
+import { Icon } from './Icon.js';
 
 interface WelcomeModalProps {
   watchmanReady?: boolean;
@@ -61,7 +62,7 @@ export const WelcomeModal: FC<WelcomeModalProps> = ({ watchmanReady = false }) =
             </button>
           ) : (
             <div class="flex items-center justify-center gap-3 text-gray-400">
-              <i data-lucide="loader-circle" class="w-5 h-5 animate-spin"></i>
+              <Icon name="loader-circle" class="w-5 h-5 animate-spin" />
               <span class="text-sm">Waiting for Watchman to start...</span>
             </div>
           )}

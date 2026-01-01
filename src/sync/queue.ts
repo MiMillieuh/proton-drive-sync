@@ -39,6 +39,8 @@ export interface JobEvent {
   timestamp: Date;
   /** Whether this job was a retry (nRetries > 0) - only set for 'processing' events */
   wasRetry?: boolean;
+  /** Timestamp when retry will be attempted - only set for 'retry' events */
+  retryAt?: Date;
 }
 
 // ============================================================================
@@ -525,6 +527,7 @@ export function scheduleRetry(
     jobId,
     localPath,
     timestamp: new Date(),
+    retryAt,
   } satisfies JobEvent);
 
   const maxRetries = MAX_RETRIES[errorCategory];
@@ -579,7 +582,7 @@ export function getJobCounts(): {
 /**
  * Get recently synced jobs.
  */
-export function getRecentJobs(limit: number = 50) {
+export function getRecentJobs() {
   return db
     .select({
       id: schema.syncJobs.id,
@@ -590,14 +593,13 @@ export function getRecentJobs(limit: number = 50) {
     .from(schema.syncJobs)
     .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
     .orderBy(desc(schema.syncJobs.id))
-    .limit(limit)
     .all();
 }
 
 /**
  * Get blocked jobs with error details.
  */
-export function getBlockedJobs(limit: number = 50) {
+export function getBlockedJobs() {
   return db
     .select({
       id: schema.syncJobs.id,
@@ -609,7 +611,6 @@ export function getBlockedJobs(limit: number = 50) {
     })
     .from(schema.syncJobs)
     .where(eq(schema.syncJobs.status, SyncJobStatus.BLOCKED))
-    .limit(limit)
     .all();
 }
 
@@ -632,7 +633,7 @@ export function getProcessingJobs() {
 /**
  * Get pending jobs (ready to process, retryAt <= now).
  */
-export function getPendingJobs(limit: number = 50) {
+export function getPendingJobs() {
   const now = new Date();
   return db
     .select({
@@ -646,14 +647,13 @@ export function getPendingJobs(limit: number = 50) {
       and(eq(schema.syncJobs.status, SyncJobStatus.PENDING), lte(schema.syncJobs.retryAt, now))
     )
     .orderBy(schema.syncJobs.retryAt)
-    .limit(limit)
     .all();
 }
 
 /**
  * Get jobs scheduled for retry (retryAt > now).
  */
-export function getRetryJobs(limit: number = 50) {
+export function getRetryJobs() {
   const nowSeconds = Math.floor(Date.now() / 1000);
   return db
     .select({
@@ -673,7 +673,6 @@ export function getRetryJobs(limit: number = 50) {
       )
     )
     .orderBy(schema.syncJobs.retryAt)
-    .limit(limit)
     .all();
 }
 

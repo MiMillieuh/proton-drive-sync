@@ -122,12 +122,8 @@
   setInterval(updateRetryCountdowns, 1000);
   updateRetryCountdowns();
 
-  // Re-initialize Lucide icons after SSE updates
-  document.body.addEventListener('htmx:afterSwap', (e) => {
-    lucide.createIcons();
+  // Update retry countdowns after SSE swaps (icons handled by layout.scripts.txt)
+  document.body.addEventListener('htmx:afterSwap', () => {
     updateRetryCountdowns();
-  });
-  document.body.addEventListener('htmx:sseMessage', () => {
-    lucide.createIcons();
   });
 </script>

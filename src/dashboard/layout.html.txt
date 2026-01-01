@@ -9,7 +9,6 @@
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
     <script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <style>
       .custom-scrollbar::-webkit-scrollbar {
         width: 8px;
@@ -90,7 +89,7 @@
       }
       /* Coffee badge always visible (when badges are shown) */
       /* GitHub badge star hover effect */
-      .github-badge:hover [data-lucide='star'] {
+      .github-badge:hover svg.icon-star {
         color: #facc15; /* yellow-400 */
       }
     </style>
@@ -131,6 +130,7 @@
     <div
       id="heartbeat-listener"
       class="hidden"
+      hx-swap="innerHTML"
       sse-swap="heartbeat"
       hx-on::after-swap="document.body.dispatchEvent(new CustomEvent('heartbeat-received'))"
     ></div>
@@ -157,7 +157,7 @@
               href="/"
               class="{{HIDE_TABS_DURING_ONBOARDING}} flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium transition-colors whitespace-nowrap {{HOME_TAB_CLASS}}"
             >
-              <i data-lucide="house" class="w-4 h-4 shrink-0"></i>
+              {{ICON_HOUSE}}
               <!-- Tab labels: first to collapse (below 850px) -->
               <span class="tab-label">Home</span>
             </a>
@@ -165,7 +165,7 @@
               href="/controls"
               class="flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium transition-colors whitespace-nowrap {{CONTROLS_TAB_CLASS}}"
             >
-              <i data-lucide="sliders-horizontal" class="w-4 h-4 shrink-0"></i>
+              {{ICON_SLIDERS}}
               <!-- Tab labels: first to collapse (below 850px) -->
               <span class="tab-label">Controls</span>
             </a>
@@ -173,7 +173,7 @@
               href="/about"
               class="{{HIDE_TABS_DURING_ONBOARDING}} flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium transition-colors whitespace-nowrap {{ABOUT_TAB_CLASS}}"
             >
-              <i data-lucide="compass" class="w-4 h-4 shrink-0"></i>
+              {{ICON_COMPASS}}
               <!-- Tab labels: first to collapse (below 850px) -->
               <span class="tab-label">About</span>
             </a>
@@ -201,7 +201,7 @@
             >
               <img src="/assets/github.svg" alt="GitHub" class="w-4 h-4" />
               <span class="socials-text text-gray-300 text-sm font-medium">GitHub</span>
-              <i data-lucide="star" class="w-4 h-4 text-white transition-colors fill-current"></i>
+              {{ICON_STAR}}
               <img
                 src="https://img.shields.io/github/stars/DamianB-BitFlipper/proton-drive-sync?style=flat&label=&color=1f2937"
                 alt="Stars"

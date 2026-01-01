@@ -1,5 +1,6 @@
 import type { FC } from 'hono/jsx';
 import type { JobCounts } from './types.js';
+import { Icon } from './Icon.js';
 
 export const Stats: FC<{ counts: JobCounts }> = ({ counts }) => {
   return (
@@ -7,7 +8,7 @@ export const Stats: FC<{ counts: JobCounts }> = ({ counts }) => {
       {/* Pending */}
       <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-amber-500/50 transition-colors group relative overflow-hidden">
         <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <i data-lucide="clock" class="w-12 h-12 text-amber-500"></i>
+          <Icon name="clock" class="w-12 h-12 text-amber-500" />
         </div>
         <dt class="text-sm font-medium text-gray-400">Pending</dt>
         <dd class="mt-2 text-3xl font-bold text-white group-hover:text-amber-400 transition-colors">
@@ -18,7 +19,7 @@ export const Stats: FC<{ counts: JobCounts }> = ({ counts }) => {
       {/* Processing */}
       <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-blue-500/50 transition-colors group relative overflow-hidden">
         <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <i data-lucide="refresh-cw" class="w-12 h-12 text-blue-500"></i>
+          <Icon name="refresh-cw" class="w-12 h-12 text-blue-500" />
         </div>
         <dt class="text-sm font-medium text-gray-400">Processing</dt>
         <dd class="mt-2 text-3xl font-bold text-white group-hover:text-blue-400 transition-colors">
@@ -29,7 +30,7 @@ export const Stats: FC<{ counts: JobCounts }> = ({ counts }) => {
       {/* Recently Synced */}
       <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-green-500/50 transition-colors group relative overflow-hidden">
         <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <i data-lucide="check" class="w-12 h-12 text-green-500"></i>
+          <Icon name="check" class="w-12 h-12 text-green-500" />
         </div>
         <dt class="text-sm font-medium text-gray-400">Recently Synced</dt>
         <dd class="mt-2 text-3xl font-bold text-white group-hover:text-green-400 transition-colors">
@@ -40,7 +41,7 @@ export const Stats: FC<{ counts: JobCounts }> = ({ counts }) => {
       {/* Blocked */}
       <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-red-500/50 transition-colors group relative overflow-hidden">
         <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-          <i data-lucide="triangle-alert" class="w-12 h-12 text-red-500"></i>
+          <Icon name="triangle-alert" class="w-12 h-12 text-red-500" />
         </div>
         <dt class="text-sm font-medium text-gray-400">Blocked</dt>
         <dd class="mt-2 text-3xl font-bold text-white group-hover:text-red-400 transition-colors">
