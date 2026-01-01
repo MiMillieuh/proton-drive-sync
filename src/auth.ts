@@ -1060,8 +1060,12 @@ export class ProtonAuth {
       throw new Error(json.Error || 'Token refresh failed');
     }
 
-    this.session.AccessToken = json.AccessToken!;
-    this.session.RefreshToken = json.RefreshToken!;
+    if (!json.AccessToken || !json.RefreshToken) {
+      throw new Error('Token refresh response missing tokens');
+    }
+
+    this.session.AccessToken = json.AccessToken;
+    this.session.RefreshToken = json.RefreshToken;
 
     return this.session;
   }

@@ -5,7 +5,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { eq, and, lte, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, lte, inArray, isNull, sql, desc } from 'drizzle-orm';
 import { db, schema, run, type Tx } from '../db/index.js';
 import { SyncJobStatus, SyncEventType } from '../db/schema.js';
 import { logger, isDebugEnabled } from '../logger.js';
@@ -438,6 +438,14 @@ export function setJobError(jobId: number, error: string, dryRun: boolean, tx: T
 export function categorizeError(error: string): ErrorClassification {
   const lowerError = error.toLowerCase();
 
+  // Local filesystem errors - unlikely to self-resolve
+  if (lowerError.includes('local path not found')) {
+    return {
+      category: ErrorCategory.LOCAL_NOT_FOUND,
+      maxRetries: MAX_RETRIES[ErrorCategory.LOCAL_NOT_FOUND],
+    };
+  }
+
   // Proton API conflict errors - delete and recreate after max retries
   if (
     lowerError.includes('draft revision already exists') ||
@@ -587,10 +595,9 @@ export function getRecentJobs(limit: number = 50) {
     })
     .from(schema.syncJobs)
     .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
-    .orderBy(schema.syncJobs.id)
+    .orderBy(desc(schema.syncJobs.id))
     .limit(limit)
-    .all()
-    .reverse();
+    .all();
 }
 
 /**

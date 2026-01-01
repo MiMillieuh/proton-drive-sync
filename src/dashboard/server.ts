@@ -170,8 +170,8 @@ async function readChildMessages(stdout: ReadableStream<Uint8Array>): Promise<vo
         } else if (msg.type === 'error') {
           logger.error(`Dashboard server error: ${msg.error} (code: ${msg.code})`);
         } else if (msg.type === 'log') {
-          // Forward dashboard logs to main logger with [DASH] tag
-          const taggedMessage = `[DASH] ${msg.message}`;
+          // Forward dashboard logs to main logger with [dashboard] tag
+          const taggedMessage = `[dashboard] ${msg.message}`;
           logger[msg.level](taggedMessage);
         }
       }

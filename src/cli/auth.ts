@@ -45,6 +45,9 @@ export async function createClientFromLogin(
   }
 
   const session = auth.getSession();
+  if (!session) {
+    throw new Error('Login failed: no session returned');
+  }
   const credentials = auth.getReusableCredentials();
 
   // Load the SDK
@@ -54,9 +57,9 @@ export async function createClientFromLogin(
   // Import telemetry module for logging configuration (not exported from main index)
   const telemetryModule = await import('@protontech/drive-sdk/dist/telemetry.js');
 
-  const httpClient = createProtonHttpClient(session!);
+  const httpClient = createProtonHttpClient(session);
   const openPGPCryptoModule = createOpenPGPCrypto();
-  const account = createProtonAccount(session!, openPGPCryptoModule);
+  const account = createProtonAccount(session, openPGPCryptoModule);
   const srpModuleInstance = createSrpModule();
 
   // Create telemetry with appropriate log level

@@ -55,6 +55,7 @@ export const REUPLOAD_DELETE_RECREATE_THRESHOLD = 2;
 export const ErrorCategory = {
   NETWORK: 'network',
   REUPLOAD_NEEDED: 'reupload_needed',
+  LOCAL_NOT_FOUND: 'local_not_found',
   OTHER: 'other',
 } as const;
 export type ErrorCategory = (typeof ErrorCategory)[keyof typeof ErrorCategory];
@@ -68,6 +69,7 @@ export interface ErrorClassification {
 export const MAX_RETRIES: Record<ErrorCategory, number> = {
   [ErrorCategory.OTHER]: RETRY_DELAYS_SEC.length,
   [ErrorCategory.REUPLOAD_NEEDED]: 4,
+  [ErrorCategory.LOCAL_NOT_FOUND]: 3,
   [ErrorCategory.NETWORK]: Infinity,
 };
 

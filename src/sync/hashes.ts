@@ -9,6 +9,7 @@ import { eq, like } from 'drizzle-orm';
 import { type Tx } from '../db/index.js';
 import { fileHashes } from '../db/schema.js';
 import { getConfig } from '../config.js';
+import { logger } from '../logger.js';
 
 // ============================================================================
 // Hash Storage CRUD
@@ -37,6 +38,16 @@ export function deleteStoredHashesUnderPath(dirPath: string, tx: Tx): void {
   const pathPrefix = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
   tx.delete(fileHashes)
     .where(like(fileHashes.localPath, `${pathPrefix}%`))
+    .run();
+}
+
+/**
+ * Update the local path for a stored hash (used during rename/move).
+ */
+export function updateStoredHashPath(oldLocalPath: string, newLocalPath: string, tx: Tx): void {
+  tx.update(fileHashes)
+    .set({ localPath: newLocalPath, updatedAt: new Date() })
+    .where(eq(fileHashes.localPath, oldLocalPath))
     .run();
 }
 
@@ -70,4 +81,36 @@ export function cleanupOrphanedHashes(tx: Tx): number {
   }
 
   return removedCount;
+}
+
+// ============================================================================
+// Hash Storage - Write Operations
+// ============================================================================
+
+/**
+ * Store or update the content hash for a file after successful sync.
+ * Fails silently with a warning log if storage fails.
+ */
+export function setFileHash(localPath: string, contentHash: string, tx: Tx): void {
+  try {
+    tx.insert(fileHashes)
+      .values({
+        localPath,
+        contentHash,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: fileHashes.localPath,
+        set: {
+          contentHash,
+          updatedAt: new Date(),
+        },
+      })
+      .run();
+    logger.debug(`Stored hash for ${localPath}`);
+  } catch (error) {
+    logger.warn(
+      `Failed to store hash for ${localPath}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }

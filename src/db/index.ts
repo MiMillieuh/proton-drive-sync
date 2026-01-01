@@ -20,6 +20,7 @@ import migration0002 from './migrations/0002_flowery_apocalypse.sql' with { type
 import migration0003 from './migrations/0003_real_sharon_carter.sql' with { type: 'text' };
 import migration0004 from './migrations/0004_wise_mockingbird.sql' with { type: 'text' };
 import migration0005 from './migrations/0005_opposite_venom.sql' with { type: 'text' };
+import migration0006 from './migrations/0006_content_hash_tracking.sql' with { type: 'text' };
 
 const migrations = [
   { id: '0000_hot_whizzer', sql: migration0000 },
@@ -28,6 +29,7 @@ const migrations = [
   { id: '0003_real_sharon_carter', sql: migration0003 },
   { id: '0004_wise_mockingbird', sql: migration0004 },
   { id: '0005_opposite_venom', sql: migration0005 },
+  { id: '0006_content_hash_tracking', sql: migration0006 },
 ];
 
 // ============================================================================

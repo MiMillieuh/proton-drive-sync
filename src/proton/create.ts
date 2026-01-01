@@ -45,10 +45,10 @@ async function ensureRemotePath(
     if (needToCreate) {
       // Once we start creating, all subsequent folders need to be created
       const result = await client.createFolder(currentFolderUid, folderName);
-      if (!result.ok) {
+      if (!result.ok || !result.value) {
         throw new Error(`Failed to create folder "${folderName}": ${result.error}`);
       }
-      currentFolderUid = result.value!.uid;
+      currentFolderUid = result.value.uid;
     } else {
       // Search for existing folder
       const existingFolderUid = await findFolderByName(client, currentFolderUid, folderName);
@@ -58,10 +58,10 @@ async function ensureRemotePath(
       } else {
         // Folder doesn't exist, create it and all subsequent folders
         const result = await client.createFolder(currentFolderUid, folderName);
-        if (!result.ok) {
+        if (!result.ok || !result.value) {
           throw new Error(`Failed to create folder "${folderName}": ${result.error}`);
         }
-        currentFolderUid = result.value!.uid;
+        currentFolderUid = result.value.uid;
         needToCreate = true; // All subsequent folders must be created
       }
     }
@@ -126,10 +126,10 @@ async function createDirectory(
     return existingFolderUid;
   } else {
     const result = await client.createFolder(targetFolderUid, dirName);
-    if (!result.ok) {
+    if (!result.ok || !result.value) {
       throw new Error(`Failed to create directory "${dirName}": ${result.error}`);
     }
-    return result.value!.uid;
+    return result.value.uid;
   }
 }
 
@@ -175,7 +175,7 @@ export async function createNode(
   // Get root folder
   const rootFolder = await client.getMyFilesRootFolder();
 
-  if (!rootFolder.ok) {
+  if (!rootFolder.ok || !rootFolder.value) {
     return {
       success: false,
       error: `Failed to get root folder: ${rootFolder.error}`,
@@ -183,7 +183,7 @@ export async function createNode(
     };
   }
 
-  const rootFolderUid = rootFolder.value!.uid;
+  const rootFolderUid = rootFolder.value.uid;
 
   // Ensure parent directories exist
   let targetFolderUid = rootFolderUid;
@@ -198,7 +198,14 @@ export async function createNode(
       const nodeUid = await createDirectory(client, targetFolderUid, name);
       return { success: true, nodeUid, parentNodeUid: targetFolderUid, isDirectory: true };
     } else {
-      const nodeUid = await uploadFile(client, targetFolderUid, localPath, name, pathStat!);
+      if (!pathStat) {
+        return {
+          success: false,
+          error: `Cannot upload file: stat unavailable for ${localPath}`,
+          isDirectory: false,
+        };
+      }
+      const nodeUid = await uploadFile(client, targetFolderUid, localPath, name, pathStat);
       return { success: true, nodeUid, parentNodeUid: targetFolderUid, isDirectory: false };
     }
   } catch (error) {

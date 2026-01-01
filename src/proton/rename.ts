@@ -31,11 +31,11 @@ async function resolveParentFolderUid(
   const { parentParts } = parsePath(remotePath);
 
   const rootFolder = await client.getMyFilesRootFolder();
-  if (!rootFolder.ok) {
+  if (!rootFolder.ok || !rootFolder.value) {
     throw new Error(`Failed to get root folder: ${rootFolder.error}`);
   }
 
-  let currentFolderUid = rootFolder.value!.uid;
+  let currentFolderUid = rootFolder.value.uid;
 
   for (const folderName of parentParts) {
     const folderUid = await findFolderByName(client, currentFolderUid, folderName);

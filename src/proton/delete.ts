@@ -37,7 +37,7 @@ export async function deleteNode(
   // Get root folder
   const rootFolder = await client.getMyFilesRootFolder();
 
-  if (!rootFolder.ok) {
+  if (!rootFolder.ok || !rootFolder.value) {
     return {
       success: false,
       existed: false,
@@ -45,7 +45,7 @@ export async function deleteNode(
     };
   }
 
-  const rootFolderUid = rootFolder.value!.uid;
+  const rootFolderUid = rootFolder.value.uid;
 
   // Traverse to parent folder
   let targetFolderUid = rootFolderUid;

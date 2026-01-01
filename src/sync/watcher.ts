@@ -255,8 +255,13 @@ export async function setupWatchSubscriptions(
     // Check if this is one of our subscriptions
     if (!resp.subscription.startsWith(WATCHMAN_SUB_NAME)) return;
 
-    // Log full subscription event data
-    logger.info(`Watchman subscription event: ${JSON.stringify(resp)}`);
+    // Log subscription event summary and full data for debugging
+    const fileCount = resp.files?.length ?? 0;
+    const isFresh = (resp as unknown as { is_fresh_instance?: boolean }).is_fresh_instance;
+    logger.debug(
+      `[watchman] subscription event: ${resp.subscription} (files: ${fileCount}, fresh: ${isFresh ?? false})`
+    );
+    logger.debug(`[watchman] subscription payload:\n${JSON.stringify(resp, null, 2)}`);
 
     // Use Watchman's root directly instead of parsing from subscription name
     const watchRoot = (resp as unknown as { root: string }).root;

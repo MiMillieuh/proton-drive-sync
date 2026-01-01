@@ -25,6 +25,7 @@ export const SyncEventType = {
   DELETE: 'DELETE',
   RENAME: 'RENAME',
   MOVE: 'MOVE',
+  DELETE_AND_CREATE: 'DELETE_AND_CREATE',
 } as const;
 
 export type SyncEventType = (typeof SyncEventType)[keyof typeof SyncEventType];

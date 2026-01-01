@@ -14,6 +14,7 @@ import { DEFAULT_SYNC_CONCURRENCY } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
 import {
   type Job,
+  enqueueJob,
   getNextPendingJob,
   markJobSynced,
   markJobBlocked,
@@ -28,6 +29,7 @@ import {
   deleteNodeMapping,
   updateNodeMappingPath,
 } from './nodes.js';
+import { setFileHash, deleteStoredHash, updateStoredHashPath } from './hashes.js';
 import * as path from 'node:path';
 import { REUPLOAD_DELETE_RECREATE_THRESHOLD } from './constants.js';
 
@@ -131,29 +133,14 @@ async function createNodeOrThrow(
   if (dryRun)
     return { nodeUid: 'dry-run-node-uid', parentNodeUid: 'dry-run-parent-uid', isDirectory: false };
   const result = await createNode(client, localPath, remotePath);
-  if (!result.success) {
-    throw new Error(result.error);
+  if (!result.success || !result.nodeUid) {
+    throw new Error(result.error ?? 'createNode returned success but no nodeUid');
   }
   return {
-    nodeUid: result.nodeUid!,
+    nodeUid: result.nodeUid,
     parentNodeUid: result.parentNodeUid ?? 'unknown',
     isDirectory: result.isDirectory ?? false,
   };
-}
-
-/** Helper to delete and recreate a node */
-async function deleteAndRecreateNode(
-  client: ProtonDriveClient,
-  localPath: string,
-  remotePath: string,
-  dryRun: boolean
-): Promise<{ nodeUid: string; parentNodeUid: string; isDirectory: boolean }> {
-  logger.info(`Deleting node for recreate: ${remotePath}`);
-  await deleteNodeOrThrow(client, remotePath, dryRun);
-  logger.info(`Deleted node ${remotePath}, now recreating`);
-  const nodeInfo = await createNodeOrThrow(client, localPath, remotePath, dryRun);
-  logger.info(`Successfully recreated node: ${remotePath} -> ${nodeInfo.nodeUid}`);
-  return nodeInfo;
 }
 
 /**
@@ -188,11 +175,15 @@ export function processAvailableJobs(client: ProtonDriveClient, dryRun: boolean)
 async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean): Promise<void> {
   const { id, eventType, localPath, remotePath, nRetries, oldLocalPath, oldRemotePath } = job;
 
+  if (!remotePath) {
+    throw new Error(`Job ${id} missing required remotePath`);
+  }
+
   try {
     switch (eventType) {
       case SyncEventType.DELETE: {
         logger.info(`Deleting: ${remotePath}`);
-        const { existed } = await deleteNodeOrThrow(client, remotePath!, dryRun);
+        const { existed } = await deleteNodeOrThrow(client, remotePath, dryRun);
         logger.info(existed ? `Deleted: ${remotePath}` : `Already gone: ${remotePath}`);
         // Remove node mapping on delete
         if (!dryRun) {
@@ -211,14 +202,17 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         const { nodeUid, parentNodeUid, isDirectory } = await createNodeOrThrow(
           client,
           localPath,
-          remotePath!,
+          remotePath,
           dryRun
         );
         logger.info(`Success: ${remotePath} -> ${nodeUid}`);
-        // Store node mapping for future rename/move operations
+        // Store node mapping and content hash for future operations
         db.transaction((tx) => {
           if (!dryRun) {
             setNodeMapping(localPath, nodeUid, parentNodeUid, isDirectory, tx);
+            if (job.contentHash) {
+              setFileHash(localPath, job.contentHash, tx);
+            }
           }
           markJobSynced(id, localPath, dryRun, tx);
         });
@@ -226,8 +220,13 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
       }
 
       case SyncEventType.RENAME: {
+        if (!oldLocalPath || !oldRemotePath) {
+          throw new Error(
+            `RENAME event missing required paths: oldLocalPath=${oldLocalPath}, oldRemotePath=${oldRemotePath}`
+          );
+        }
         logger.info(`Renaming: ${oldRemotePath} -> ${remotePath}`);
-        const mapping = getNodeMapping(oldLocalPath!);
+        const mapping = getNodeMapping(oldLocalPath);
         if (!mapping) {
           throw new Error(`Node mapping not found for ${oldLocalPath}, cannot rename`);
         }
@@ -240,7 +239,8 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         }
         db.transaction((tx) => {
           if (!dryRun) {
-            updateNodeMappingPath(oldLocalPath!, localPath, undefined, tx);
+            updateNodeMappingPath(oldLocalPath, localPath, undefined, tx);
+            updateStoredHashPath(oldLocalPath, localPath, tx);
           }
           markJobSynced(id, localPath, dryRun, tx);
         });
@@ -249,20 +249,27 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
       }
 
       case SyncEventType.MOVE: {
+        if (!oldLocalPath || !oldRemotePath) {
+          throw new Error(
+            `MOVE event missing required paths: oldLocalPath=${oldLocalPath}, oldRemotePath=${oldRemotePath}`
+          );
+        }
         logger.info(`Moving: ${oldRemotePath} -> ${remotePath}`);
-        const mapping = getNodeMapping(oldLocalPath!);
+        const mapping = getNodeMapping(oldLocalPath);
         if (!mapping) {
           throw new Error(`Node mapping not found for ${oldLocalPath}, cannot move`);
         }
 
         // Get the new parent's nodeUid
         const newParentLocalPath = path.dirname(localPath);
-        const newParentNodeUid = await getParentFolderUid(client, newParentLocalPath);
+        const newParentNodeUid = dryRun
+          ? 'dry-run-parent-uid'
+          : await getParentFolderUid(client, newParentLocalPath);
         if (!newParentNodeUid) {
           throw new Error(`Parent folder not found for ${newParentLocalPath}`);
         }
 
-        const oldName = path.basename(oldLocalPath!);
+        const oldName = path.basename(oldLocalPath);
         const newName = path.basename(localPath);
         const nameChanged = oldName !== newName;
 
@@ -277,11 +284,54 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         }
         db.transaction((tx) => {
           if (!dryRun) {
-            updateNodeMappingPath(oldLocalPath!, localPath, newParentNodeUid, tx);
+            updateNodeMappingPath(oldLocalPath, localPath, newParentNodeUid, tx);
+            updateStoredHashPath(oldLocalPath, localPath, tx);
           }
           markJobSynced(id, localPath, dryRun, tx);
         });
         logger.info(`Moved: ${oldRemotePath} -> ${remotePath}`);
+        return;
+      }
+
+      case SyncEventType.DELETE_AND_CREATE: {
+        if (!oldLocalPath || !oldRemotePath) {
+          throw new Error(
+            `DELETE_AND_CREATE event missing required paths: oldLocalPath=${oldLocalPath}, oldRemotePath=${oldRemotePath}`
+          );
+        }
+        // Step 1: Delete old remote path (ignore if not exists)
+        logger.info(`Delete+Create: deleting ${oldRemotePath}`);
+        await deleteNodeOrThrow(client, oldRemotePath, dryRun);
+
+        // Step 2: Clean up old mappings
+        if (!dryRun) {
+          db.transaction((tx) => {
+            deleteNodeMapping(oldLocalPath, tx);
+            deleteStoredHash(oldLocalPath, tx);
+          });
+        }
+
+        // Step 3: Create at new path
+        logger.info(`Delete+Create: creating ${remotePath}`);
+        const { nodeUid, parentNodeUid, isDirectory } = await createNodeOrThrow(
+          client,
+          localPath,
+          remotePath,
+          dryRun
+        );
+
+        // Step 4: Store new mappings
+        db.transaction((tx) => {
+          if (!dryRun) {
+            setNodeMapping(localPath, nodeUid, parentNodeUid, isDirectory, tx);
+            if (job.contentHash) {
+              setFileHash(localPath, job.contentHash, tx);
+            }
+          }
+          markJobSynced(id, localPath, dryRun, tx);
+        });
+
+        logger.info(`Delete+Create complete: ${oldRemotePath} -> ${remotePath}`);
         return;
       }
 
@@ -294,7 +344,8 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
     const errorMessage = getErrorMessage(error);
     const { category: errorCategory, maxRetries } = categorizeError(errorMessage);
 
-    if (errorCategory === ErrorCategory.OTHER && nRetries >= maxRetries) {
+    if (nRetries >= maxRetries && maxRetries !== Infinity) {
+      // Block the job after exhausting retries
       logger.error(
         `Job ${id} (${localPath}) failed permanently after ${maxRetries} retries: ${errorMessage}`
       );
@@ -302,50 +353,28 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         setJobError(id, errorMessage, dryRun, tx);
         markJobBlocked(id, localPath, errorMessage, dryRun, tx);
       });
-    } else if (errorCategory === ErrorCategory.REUPLOAD_NEEDED) {
-      if (nRetries >= maxRetries) {
-        // Exceeded max retries, move to blocked queue
-        logger.error(
-          `Job ${id} (${localPath}) failed permanently after ${maxRetries} retries: ${errorMessage}`
+    } else if (
+      errorCategory === ErrorCategory.REUPLOAD_NEEDED &&
+      nRetries >= REUPLOAD_DELETE_RECREATE_THRESHOLD
+    ) {
+      // REUPLOAD_NEEDED with retry count >= 2: enqueue DELETE_AND_CREATE job
+      logger.warn(`Job ${id} (${localPath}) retry ${nRetries}, converting to DELETE_AND_CREATE`);
+      db.transaction((tx) => {
+        enqueueJob(
+          {
+            eventType: SyncEventType.DELETE_AND_CREATE,
+            localPath,
+            remotePath,
+            oldLocalPath: localPath,
+            oldRemotePath: remotePath,
+            contentHash: job.contentHash,
+          },
+          dryRun,
+          tx
         );
-        db.transaction((tx) => {
-          setJobError(id, errorMessage, dryRun, tx);
-          markJobBlocked(id, localPath, errorMessage, dryRun, tx);
-        });
-      } else if (nRetries >= REUPLOAD_DELETE_RECREATE_THRESHOLD) {
-        // Retry count >= 2, attempt delete+recreate
-        logger.warn(`Job ${id} (${localPath}) retry ${nRetries}, attempting delete+recreate`);
-        try {
-          const nodeInfo = await deleteAndRecreateNode(client, localPath, remotePath!, dryRun);
-          db.transaction((tx) => {
-            if (!dryRun) {
-              setNodeMapping(
-                localPath,
-                nodeInfo.nodeUid,
-                nodeInfo.parentNodeUid,
-                nodeInfo.isDirectory,
-                tx
-              );
-            }
-            markJobSynced(id, localPath, dryRun, tx);
-          });
-        } catch (recreateError) {
-          const recreateErrorMsg = getErrorMessage(recreateError);
-          logger.error(`Failed to delete+recreate node: ${recreateErrorMsg}`);
-          db.transaction((tx) => {
-            setJobError(id, recreateErrorMsg, dryRun, tx);
-            scheduleRetry(id, localPath, nRetries, errorCategory, dryRun, tx);
-          });
-        }
-      } else {
-        // Retry count < 2, normal retry
-        logger.error(`Job ${id} (${localPath}) failed: ${errorMessage}`);
-        db.transaction((tx) => {
-          setJobError(id, errorMessage, dryRun, tx);
-          scheduleRetry(id, localPath, nRetries, errorCategory, dryRun, tx);
-        });
-      }
+      });
     } else {
+      // Schedule retry for all other cases
       logger.error(`Job ${id} (${localPath}) failed: ${errorMessage}`);
       db.transaction((tx) => {
         setJobError(id, errorMessage, dryRun, tx);

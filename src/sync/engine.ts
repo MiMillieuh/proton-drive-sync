@@ -127,62 +127,44 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
     }
   }
 
-  // Process all database operations in a single transaction
-  db.transaction((tx) => {
-    // Process renames/moves
-    for (const { from, to } of renames) {
-      const fromParent = dirname(from.localPath);
-      const toParent = dirname(to.localPath);
-      const isSameParent = fromParent === toParent;
-
-      // Check if we have node mapping for the old path (required for rename/move)
+  // Process renames/moves (one transaction per event)
+  for (const { from, to } of renames) {
+    db.transaction((tx) => {
+      const isFile = from.type !== 'd';
+      const isSameParent = dirname(from.localPath) === dirname(to.localPath);
       const nodeMapping = getNodeMapping(from.localPath, tx);
 
-      if (!nodeMapping) {
-        // No mapping found - fall back to DELETE + CREATE
-        logger.debug(`No node mapping for ${from.localPath}, falling back to DELETE + CREATE`);
+      // Check if we need DELETE_AND_CREATE (no mapping, or content changed for files)
+      const noMapping = !nodeMapping;
+      const storedHash = isFile ? getStoredHash(from.localPath, tx) : null;
+      const newHash = to['content.sha1hex'] ?? null;
+      const contentChanged = isFile && storedHash && newHash && storedHash !== newHash;
 
-        // Enqueue DELETE for old path
+      if (noMapping || contentChanged) {
+        const reason = noMapping ? 'no mapping' : 'content changed';
+        logger.info(`[delete+create] ${from.name} -> ${to.name} (${reason})`);
         enqueueJob(
           {
-            eventType: SyncEventType.DELETE,
-            localPath: from.localPath,
-            remotePath: from.remotePath,
-            contentHash: null,
-            oldLocalPath: null,
-            oldRemotePath: null,
+            eventType: SyncEventType.DELETE_AND_CREATE,
+            localPath: to.localPath,
+            remotePath: to.remotePath,
+            contentHash: newHash,
+            oldLocalPath: from.localPath,
+            oldRemotePath: from.remotePath,
           },
           dryRun,
           tx
         );
         deleteStoredHash(from.localPath, tx);
         deleteNodeMapping(from.localPath, tx);
-        if (from.type === 'd') {
+        if (!isFile) {
           deleteStoredHashesUnderPath(from.localPath, tx);
           deleteNodeMappingsUnderPath(from.localPath, tx);
         }
-
-        // Enqueue CREATE for new path
-        const eventType = SyncEventType.CREATE;
-        const contentHash = to['content.sha1hex'] ?? null;
-        logger.info(`[fallback create] ${to.name} (type: ${to.type === 'd' ? 'dir' : 'file'})`);
-        enqueueJob(
-          {
-            eventType,
-            localPath: to.localPath,
-            remotePath: to.remotePath,
-            contentHash,
-            oldLocalPath: null,
-            oldRemotePath: null,
-          },
-          dryRun,
-          tx
-        );
-
-        continue;
+        return;
       }
 
-      // We have mapping - enqueue RENAME or MOVE
+      // Pure rename/move (no content change)
       const eventType = isSameParent ? SyncEventType.RENAME : SyncEventType.MOVE;
       const typeLabel = to.type === 'd' ? 'dir' : 'file';
       logger.info(`[${eventType.toLowerCase()}] ${from.name} -> ${to.name} (type: ${typeLabel})`);
@@ -199,12 +181,17 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
         dryRun,
         tx
       );
-    }
+    });
+  }
 
-    // Process remaining deletes
-    for (const file of deletesByIno.values()) {
+  // Process remaining deletes (one transaction per event)
+  for (const file of deletesByIno.values()) {
+    db.transaction((tx) => {
       const typeLabel = file.type === 'd' ? 'dir' : 'file';
-      logger.info(`[delete] ${file.name} (type: ${typeLabel})`);
+      logger.info(`[watchman] [delete] ${file.name} (type: ${typeLabel})`);
+      logger.debug(
+        `[watchman] [delete] ${file.name} (type: ${typeLabel}, hash: ${file['content.sha1hex'] || 'none'}, ino: ${file.ino}, size: ${file.size})`
+      );
 
       enqueueJob(
         {
@@ -225,12 +212,28 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
         deleteStoredHashesUnderPath(file.localPath, tx);
         deleteNodeMappingsUnderPath(file.localPath, tx);
       }
-    }
+    });
+  }
 
-    // Process remaining creates
-    for (const file of createsByIno.values()) {
+  // Process remaining creates (one transaction per event)
+  for (const file of createsByIno.values()) {
+    db.transaction((tx) => {
       const typeLabel = file.type === 'd' ? 'dir' : 'file';
-      logger.info(`[create] ${file.name} (type: ${typeLabel})`);
+
+      // For files, check if content hash already matches stored hash (already synced)
+      if (file.type !== 'd') {
+        const storedHash = getStoredHash(file.localPath, tx);
+        const newHash = file['content.sha1hex'];
+        if (storedHash && storedHash === newHash) {
+          logger.debug(`[skip] create hash unchanged: ${file.name}`);
+          return;
+        }
+      }
+
+      logger.info(`[watchman] [create] ${file.name} (type: ${typeLabel})`);
+      logger.debug(
+        `[watchman] [create] ${file.name} (type: ${typeLabel}, hash: ${file['content.sha1hex'] || 'none'}, ino: ${file.ino}, size: ${file.size})`
+      );
 
       enqueueJob(
         {
@@ -244,16 +247,18 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
         dryRun,
         tx
       );
+    });
+  }
+
+  // Process updates (one transaction per event, files only)
+  for (const file of updates) {
+    if (file.type === 'd') {
+      // Directory metadata change - skip
+      logger.debug(`[skip] directory metadata change: ${file.name}`);
+      continue;
     }
 
-    // Process updates (files only, directories ignored)
-    for (const file of updates) {
-      if (file.type === 'd') {
-        // Directory metadata change - skip
-        logger.debug(`[skip] directory metadata change: ${file.name}`);
-        continue;
-      }
-
+    db.transaction((tx) => {
       // File update - compare hash
       const storedHash = getStoredHash(file.localPath, tx);
       const newHash = file['content.sha1hex'];
@@ -261,11 +266,14 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
       if (storedHash && storedHash === newHash) {
         // Content unchanged - skip
         logger.debug(`[skip] hash unchanged: ${file.name}`);
-        continue;
+        return;
       }
 
       logger.info(
-        `[update] ${file.name} (hash: ${storedHash?.slice(0, 8) || 'none'} -> ${newHash?.slice(0, 8) || 'none'})`
+        `[watchman] [update] ${file.name} (hash: ${storedHash?.slice(0, 8) || 'none'} -> ${newHash?.slice(0, 8) || 'none'})`
+      );
+      logger.debug(
+        `[watchman] [update] ${file.name} (hash: ${storedHash || 'none'} -> ${newHash || 'none'}, ino: ${file.ino}, size: ${file.size})`
       );
 
       enqueueJob(
@@ -280,8 +288,8 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
         dryRun,
         tx
       );
-    }
-  });
+    });
+  }
 }
 
 // ============================================================================
@@ -408,8 +416,12 @@ interface ProcessorHandle {
 function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): ProcessorHandle {
   let running = true;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
+  let loopCount = 0;
   const processLoop = (): void => {
+    loopCount++;
+    if (loopCount % 10 === 0) {
+      logger.debug('processLoop iteration');
+    }
     if (!running) return;
 
     const paused = isPaused();
