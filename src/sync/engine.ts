@@ -228,6 +228,13 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
           logger.debug(`[skip] create hash unchanged: ${file.name}`);
           return;
         }
+      } else {
+        // For directories, check if we already have a node mapping (already synced)
+        const existingMapping = getNodeMapping(file.localPath, tx);
+        if (existingMapping) {
+          logger.debug(`[skip] create directory already synced: ${file.name}`);
+          return;
+        }
       }
 
       logger.info(`[watchman] [create] ${file.name} (type: ${typeLabel})`);
