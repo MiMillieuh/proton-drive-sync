@@ -159,43 +159,61 @@ export async function authCommand(): Promise<void> {
 
   logger.info('\nAuthenticating with Proton...');
 
-  // Authenticate and get tokens
+  await initCrypto();
+  const auth = new ProtonAuth();
+
   try {
-    const { credentials } = await createClientFromLogin(username, pwd, envMailboxPwd);
+    // Step 1: Initial login
+    try {
+      await auth.login(username, pwd);
+    } catch (error) {
+      const apiError = error as ApiError;
+
+      // Step 2: Handle 2FA if required
+      if (apiError.requires2FA) {
+        const code = await input({ message: 'Enter 2FA code (Security Key not supported):' });
+        try {
+          await auth.submit2FA(code);
+        } catch (error2FA) {
+          // After 2FA, might still need mailbox password
+          if (!(error2FA as ApiError).requiresMailboxPassword) {
+            throw error2FA;
+          }
+          // Fall through to mailbox password handling below
+        }
+      } else if (!apiError.requiresMailboxPassword) {
+        throw error;
+      }
+    }
+
+    // Step 3: Handle mailbox password if required (two-password mode)
+    const session = auth.getSession();
+    if (session?.passwordMode === 2 && !session.keyPassword) {
+      logger.info('Two-password mode detected.');
+      const mailboxPwd = envMailboxPwd || (await password({ message: 'Mailbox password:' }));
+      await auth.submitMailboxPassword(mailboxPwd);
+    }
+
+    // Step 4: Get credentials and create client
+    const finalSession = auth.getSession();
+    if (!finalSession) {
+      throw new Error('Login failed: no session returned');
+    }
+    const credentials = auth.getReusableCredentials();
+
+    // Verify client can be created (validates the session works)
+    await createProtonDriveClientFromSession(finalSession, false);
 
     // Save tokens and username to keychain
     await deleteStoredCredentials();
-    await storeCredentials(credentials);
+    await storeCredentials({ ...credentials, username });
     logger.info('Credentials saved securely.');
   } catch (error) {
     const apiError = error as ApiError;
-
-    if (apiError.requiresMailboxPassword) {
-      // Two-password mode detected - prompt for mailbox password
-      logger.info('Two-password mode detected.');
-      const mailboxPwd = envMailboxPwd || (await password({ message: 'Mailbox password:' }));
-
-      try {
-        const { credentials } = await createClientFromLogin(username, pwd, mailboxPwd);
-
-        // Save tokens and username to keychain
-        await deleteStoredCredentials();
-        await storeCredentials(credentials);
-        logger.info('Credentials saved securely.');
-      } catch (innerError) {
-        const innerApiError = innerError as ApiError;
-        const message = innerApiError.message || 'Unknown error';
-        const code = innerApiError.code ? ` (code: ${innerApiError.code})` : '';
-        logger.debug('Full authentication error:', innerApiError);
-        logger.error(`Authentication failed${code}: ${message}`);
-        process.exit(1);
-      }
-    } else {
-      const message = apiError.message || 'Unknown error';
-      const code = apiError.code ? ` (code: ${apiError.code})` : '';
-      logger.debug('Full authentication error:', apiError);
-      logger.error(`Authentication failed${code}: ${message}`);
-      process.exit(1);
-    }
+    const message = apiError.message || 'Unknown error';
+    const code = apiError.code ? ` (code: ${apiError.code})` : '';
+    logger.debug('Full authentication error:', apiError);
+    logger.error(`Authentication failed${code}: ${message}`);
+    process.exit(1);
   }
 }

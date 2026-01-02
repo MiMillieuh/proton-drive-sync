@@ -53,6 +53,13 @@ interface AddressKeyInfo {
   passphrase: string;
 }
 
+/**
+ * Password mode for Proton accounts:
+ * - 1: Single password mode (login password = mailbox password)
+ * - 2: Two-password mode (separate login and mailbox passwords)
+ */
+export type PasswordMode = 1 | 2;
+
 interface AddressData {
   ID: string;
   Email: string;
@@ -72,7 +79,7 @@ export interface Session {
   primaryKey?: openpgp.PrivateKey;
   addresses?: AddressData[];
   password?: string;
-  passwordMode?: number; // 1 = Single, 2 = Dual (two-password mode)
+  passwordMode?: PasswordMode;
 }
 
 interface User {
@@ -152,8 +159,8 @@ interface ReusableCredentials {
   SaltedKeyPass: string;
   UserID: string;
 
-  // Password mode: 1 = Single, 2 = Dual (two-password mode)
-  passwordMode: number;
+  // Password mode: 1 = Single, 2 = Two-password mode
+  passwordMode: PasswordMode;
 }
 
 // ============================================================================
@@ -899,7 +906,7 @@ export class ProtonAuth {
         UID: authResponse.UID,
         AccessToken: authResponse.AccessToken,
         RefreshToken: authResponse.RefreshToken,
-        passwordMode: authResponse.PasswordMode ?? 1,
+        passwordMode: (authResponse.PasswordMode ?? 1) as PasswordMode,
       };
 
       const error = new Error('2FA required') as ApiError;
@@ -911,7 +918,7 @@ export class ProtonAuth {
     }
 
     // Check for two-password mode (PasswordMode: 1 = Single, 2 = Dual)
-    const passwordMode = authResponse.PasswordMode ?? 1;
+    const passwordMode = (authResponse.PasswordMode ?? 1) as PasswordMode;
     if (passwordMode === 2) {
       // Two-password mode - need separate mailbox password for key decryption
       this.parentSession = {
@@ -1048,7 +1055,8 @@ export class ProtonAuth {
     addresses: Address[],
     keySalts: KeySalt[],
     keyPassword: string,
-    password?: string
+    password?: string,
+    passwordMode: number = 1 // 1 = single, 2 = two-password mode
   ): Promise<AddressData[]> {
     const result: AddressData[] = [];
 
@@ -1072,17 +1080,39 @@ export class ProtonAuth {
               decryptionKeys: this.session.primaryKey,
             });
             addressKeyPassword = decryptedToken.data as string;
+          } else if (key.Token && passwordMode === 2) {
+            // Two-password mode requires Token decryption - fail if primaryKey unavailable
+            throw new Error(
+              `Address key ${key.ID} has Token but primary key is not available. Re-authentication required.`
+            );
           } else if (password) {
-            // Use password-derived key if password is available
+            // Use password-derived key if password is available (single-password mode)
             const keySalt = keySalts.find((s) => s.ID === key.ID);
             if (keySalt?.KeySalt) {
               addressKeyPassword = await computeKeyPassword(password, keySalt.KeySalt);
             }
           }
 
-          // Fallback to the user's key password
+          // Fallback to the user's key password - only valid for single-password mode
           if (!addressKeyPassword) {
+            if (passwordMode === 2) {
+              throw new Error(
+                `Failed to derive passphrase for address key ${key.ID} in two-password mode. Re-authentication required.`
+              );
+            }
             addressKeyPassword = keyPassword;
+          }
+
+          // Verify passphrase by attempting to decrypt the address key (two-password mode only)
+          if (addressKeyPassword && passwordMode === 2) {
+            try {
+              const privateKey = await openpgp.readPrivateKey({ armoredKey: key.PrivateKey });
+              await openpgp.decryptKey({ privateKey, passphrase: addressKeyPassword });
+            } catch {
+              throw new Error(
+                `Address key ${key.ID} passphrase verification failed. Re-authentication required.`
+              );
+            }
           }
 
           if (addressKeyPassword) {
@@ -1096,6 +1126,10 @@ export class ProtonAuth {
             });
           }
         } catch (error) {
+          // In two-password mode, all errors are fatal
+          if (passwordMode === 2) {
+            throw new Error(`Failed to process address key ${key.ID}: ${(error as Error).message}`);
+          }
           logger.warn(`Failed to process address key ${key.ID}:`, (error as Error).message);
         }
       }
@@ -1172,7 +1206,8 @@ export class ProtonAuth {
       addresses,
       keySalts,
       this.session.keyPassword || '',
-      password
+      password,
+      this.session.passwordMode ?? 1
     );
   }
 
@@ -1229,6 +1264,7 @@ export class ProtonAuth {
       AccessToken: parentAccessToken,
       RefreshToken: parentRefreshToken,
       keyPassword: SaltedKeyPass,
+      passwordMode: credentials.passwordMode,
     };
 
     // Restore child session (the active working session)
@@ -1237,6 +1273,7 @@ export class ProtonAuth {
       AccessToken: childAccessToken,
       RefreshToken: childRefreshToken,
       keyPassword: SaltedKeyPass,
+      passwordMode: credentials.passwordMode,
     };
 
     // Helper to refresh token when needed
@@ -1261,6 +1298,12 @@ export class ProtonAuth {
           });
           this.session.primaryKey = decryptedKey;
         } catch (error) {
+          // In two-password mode, primary key decryption is required for address key Token decryption
+          if (credentials.passwordMode === 2) {
+            throw new Error(
+              `Failed to decrypt primary user key in two-password mode. Re-authentication required.`
+            );
+          }
           logger.warn('Failed to decrypt primary user key:', (error as Error).message);
         }
       }
@@ -1273,7 +1316,13 @@ export class ProtonAuth {
 
       // Process addresses and their keys using the shared helper
       // Note: No keySalts needed here since we use SaltedKeyPass directly
-      this.session.addresses = await this._processAddressKeys(addresses, [], SaltedKeyPass);
+      this.session.addresses = await this._processAddressKeys(
+        addresses,
+        [],
+        SaltedKeyPass,
+        undefined,
+        credentials.passwordMode
+      );
 
       return this.session;
     } catch (error) {

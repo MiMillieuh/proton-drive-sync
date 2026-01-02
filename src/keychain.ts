@@ -8,6 +8,7 @@
 
 import keytar from 'keytar';
 import { logger } from './logger.js';
+import type { PasswordMode } from './auth.js';
 
 const KEYCHAIN_SERVICE = 'proton-drive-sync';
 const KEYCHAIN_ACCOUNT = 'proton-drive-sync:tokens';
@@ -29,8 +30,8 @@ export interface StoredCredentials {
   UserID: string;
   username: string;
 
-  // Password mode: 1 = Single, 2 = Dual (two-password mode)
-  passwordMode: number;
+  // Password mode: 1 = Single, 2 = Two-password mode
+  passwordMode: PasswordMode;
 }
 
 export async function getStoredCredentials(): Promise<StoredCredentials | null> {
