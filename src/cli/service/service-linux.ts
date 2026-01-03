@@ -450,38 +450,70 @@ function createLinuxService(scope: InstallScope): ServiceOperations {
     },
 
     async uninstall(interactive: boolean): Promise<boolean> {
-      // System scope requires root
-      if (scope === 'system' && !isRunningAsRoot()) {
-        logger.error('System scope requires running with sudo');
-        return false;
-      }
+      // Check both user and system level for installed services
+      const userPaths = getPaths('user');
+      const systemPaths = getPaths('system');
 
-      if (!existsSync(paths.servicePath) && !existsSync(paths.keyringServicePath)) {
+      const hasUserService =
+        existsSync(userPaths.servicePath) || existsSync(userPaths.keyringServicePath);
+      const hasSystemService =
+        existsSync(systemPaths.servicePath) || existsSync(systemPaths.keyringServicePath);
+
+      if (!hasUserService && !hasSystemService) {
         if (interactive) {
           logger.info('No service is installed.');
         }
         return true;
       }
 
-      logger.info(`Uninstalling proton-drive-sync service (${scope} scope)...`);
-
-      // Stop and disable the main service
-      if (!this.unload()) {
-        logger.warn('Failed to unload service, continuing with uninstall...');
+      // Check if we need root for system service
+      if (hasSystemService && !isRunningAsRoot()) {
+        logger.error('System service found. Run with sudo to uninstall.');
+        return false;
       }
 
-      // Remove main service file
-      if (existsSync(paths.servicePath)) {
-        unlinkSync(paths.servicePath);
-        logger.info(`Removed: ${paths.servicePath}`);
+      // Uninstall user-level service if it exists
+      if (hasUserService) {
+        logger.info('Uninstalling user-level service...');
+
+        // Stop and disable the main service
+        runSystemctl('user', 'stop', SERVICE_NAME);
+        runSystemctl('user', 'disable', SERVICE_NAME);
+
+        // Remove main service file
+        if (existsSync(userPaths.servicePath)) {
+          unlinkSync(userPaths.servicePath);
+          logger.info(`Removed: ${userPaths.servicePath}`);
+        }
+
+        // Uninstall keyring service
+        uninstallKeyringService('user');
+
+        daemonReload('user');
       }
 
-      // Uninstall keyring service
-      uninstallKeyringService(scope);
+      // Uninstall system-level service if it exists
+      if (hasSystemService) {
+        logger.info('Uninstalling system-level service...');
 
-      daemonReload(scope);
+        // Stop and disable the main service
+        runSystemctl('system', 'stop', SERVICE_NAME);
+        runSystemctl('system', 'disable', SERVICE_NAME);
+
+        // Remove main service file
+        if (existsSync(systemPaths.servicePath)) {
+          unlinkSync(systemPaths.servicePath);
+          logger.info(`Removed: ${systemPaths.servicePath}`);
+        }
+
+        // Uninstall keyring service
+        uninstallKeyringService('system');
+
+        daemonReload('system');
+      }
 
       clearFlag(FLAGS.SERVICE_INSTALLED);
+      clearFlag(FLAGS.SERVICE_LOADED);
       logger.info('proton-drive-sync service uninstalled.');
       return true;
     },

@@ -130,6 +130,12 @@ install_watchman_macos() {
 	echo -e "${MUTED}Installing Watchman via Homebrew...${NC}"
 	brew update
 	brew install watchman
+
+	# Install jq for JSON parsing if not present
+	if ! command -v jq >/dev/null 2>&1; then
+		echo -e "${MUTED}Installing jq...${NC}"
+		brew install jq
+	fi
 }
 
 install_watchman_linux() {
@@ -259,18 +265,18 @@ install_linux_dependencies() {
 		return
 	fi
 
-	echo -e "${MUTED}Installing keyring dependencies (libsecret, gnome-keyring, dbus-x11)...${NC}"
+	echo -e "${MUTED}Installing dependencies (libsecret, gnome-keyring, dbus-x11, jq)...${NC}"
 
 	if command -v apt-get >/dev/null 2>&1; then
 		sudo apt-get update
-		sudo apt-get install -y libsecret-1-0 gnome-keyring dbus-x11
+		sudo apt-get install -y libsecret-1-0 gnome-keyring dbus-x11 jq
 	elif command -v dnf >/dev/null 2>&1; then
-		sudo dnf install -y libsecret gnome-keyring dbus-x11
+		sudo dnf install -y libsecret gnome-keyring dbus-x11 jq
 	elif command -v pacman >/dev/null 2>&1; then
-		sudo pacman -Sy --noconfirm libsecret gnome-keyring dbus
+		sudo pacman -Sy --noconfirm libsecret gnome-keyring dbus jq
 	else
 		echo -e "${ORANGE}Warning: Could not install dependencies automatically${NC}"
-		echo -e "${MUTED}Please install libsecret, gnome-keyring, and dbus-x11 manually${NC}"
+		echo -e "${MUTED}Please install libsecret, gnome-keyring, dbus-x11, and jq manually${NC}"
 	fi
 }
 
@@ -516,7 +522,6 @@ else
 		echo -e ""
 		echo -e "  ${MUTED}Installing service...${NC}"
 		proton-drive-sync service install
-		proton-drive-sync service load
 	else
 		echo -e ""
 		echo -e "  ${MUTED}Skipping automatic startup.${NC}"
@@ -547,10 +552,9 @@ port=4242
 status=""
 
 while [ $attempt -lt $max_attempts ]; do
-	status_json=$(proton-drive-sync status 2>/dev/null)
-	if [ $? -eq 0 ]; then
-		status=$(echo "$status_json" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-		port=$(echo "$status_json" | grep -o '"port":[0-9]*' | cut -d':' -f2)
+	if status_json=$(proton-drive-sync status 2>/dev/null); then
+		status=$(echo "$status_json" | jq -r '.status' 2>/dev/null) || true
+		port=$(echo "$status_json" | jq -r '.port' 2>/dev/null) || true
 		if [ "$status" = "running" ]; then
 			break
 		fi

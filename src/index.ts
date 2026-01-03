@@ -119,8 +119,7 @@ serviceCommand
   .command('uninstall')
   .description('Stop and uninstall the system service')
   .option('-y, --yes', 'Skip confirmation prompts')
-  .option('--install-scope <scope>', 'Install scope: user or system (Linux only)', 'user')
-  .action((options) => serviceUninstallCommand(!options.yes, options.installScope as InstallScope));
+  .action((options) => serviceUninstallCommand(!options.yes));
 
 serviceCommand
   .command('load')

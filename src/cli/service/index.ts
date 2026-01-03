@@ -85,10 +85,7 @@ export async function serviceInstallCommand(
   await service.install(binPath, keyringPassword);
 }
 
-export async function serviceUninstallCommand(
-  interactive: boolean = true,
-  scope: InstallScope = 'user'
-): Promise<void> {
+export async function serviceUninstallCommand(interactive: boolean = true): Promise<void> {
   if (!isSupportedPlatform()) {
     if (interactive) {
       logger.error(`Service uninstallation is only supported on macOS, Linux, and Windows.`);
@@ -97,17 +94,9 @@ export async function serviceUninstallCommand(
     return;
   }
 
-  validateScope(scope);
-
-  const service = await getServiceManager(scope);
-
-  if (!service.isInstalled()) {
-    if (interactive) {
-      logger.info('No service is installed.');
-    }
-    return;
-  }
-
+  // For Linux, uninstall checks both user and system scopes internally
+  // For macOS/Windows, use the default service manager
+  const service = await getServiceManager('user');
   await service.uninstall(interactive);
 }
 
