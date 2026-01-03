@@ -1,16 +1,44 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: ['Deploy to GitHub Pages']
-    types: [completed]
+  release:
+    types: [created]
+  workflow_dispatch:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
+  deploy-pages:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: gh_pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
   build:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release'
+    needs: deploy-pages
+    if: github.event_name == 'release'
     strategy:
       matrix:
         include:
@@ -55,8 +83,10 @@ jobs:
       - name: Install Watchman (Linux ARM64)
         if: runner.os == 'Linux' && matrix.target == 'linux-arm64'
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libgoogle-glog-dev libboost-all-dev libgflags-dev libevent-dev libdouble-conversion-dev libssl-dev libsnappy1v5 libzstd1 liblz4-1 libunwind8
           curl -L -o watchman.deb "https://www.damianb.dev/proton-drive-sync/watchman_2025.12.28.00_arm64.deb"
-          sudo dpkg -i watchman.deb || sudo apt-get install -f -y
+          sudo dpkg -i watchman.deb
 
       - name: Install Watchman (Windows)
         if: runner.os == 'Windows'
@@ -101,7 +131,7 @@ jobs:
           name: proton-drive-sync-${{ matrix.target }}
           path: proton-drive-sync-${{ matrix.target }}.zip
 
-  release:
+  upload-release:
     needs: build
     runs-on: ubuntu-latest
 
@@ -111,7 +141,7 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create Release
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
