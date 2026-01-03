@@ -345,11 +345,6 @@ setup_headless_keyring() {
 	systemctl --user enable gnome-keyring-headless.service
 
 	echo -e "${MUTED}Headless keyring support configured${NC}"
-	echo -e ""
-	echo -e "  ${ORANGE}SECURITY WARNING:${NC} The keyring password is stored in plain text at:"
-	echo -e "  ${MUTED}$keyring_init_script${NC}"
-	echo -e "  ${MUTED}File permissions are set to 700 (owner read/write/execute only).${NC}"
-	echo -e ""
 }
 
 # Install dependencies (libsecret installed later after headless choice is made)
@@ -545,6 +540,10 @@ if [[ "$headless_choice" =~ ^[Yy]$ ]]; then
 		echo -e ""
 		echo -e "  In headless mode, gnome-keyring needs to be started manually."
 		echo -e "  A password is required to unlock the keyring on startup."
+		echo -e ""
+		echo -e "  ${ORANGE}SECURITY WARNING:${NC} The keyring password will be stored in plain text at:"
+		echo -e "  ${MUTED}~/.local/share/proton-drive-sync/keyring_init.sh${NC}"
+		echo -e "  ${MUTED}File permissions are set to 700 (owner read/write/execute only).${NC}"
 		echo -e ""
 
 		# Prompt for keyring password with confirmation
