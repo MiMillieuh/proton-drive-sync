@@ -269,9 +269,9 @@ install_libsecret() {
 	local base_packages_pacman="libsecret gnome-keyring"
 
 	if [ "$headless_mode" = "true" ]; then
-		base_packages_apt="$base_packages_apt dbus-x11"
-		base_packages_dnf="$base_packages_dnf dbus-x11"
-		base_packages_pacman="$base_packages_pacman dbus"
+		base_packages_apt="$base_packages_apt dbus-x11 libsecret-tools"
+		base_packages_dnf="$base_packages_dnf dbus-x11 libsecret-tools"
+		base_packages_pacman="$base_packages_pacman dbus libsecret"
 	fi
 
 	# Check if libsecret is already available
@@ -582,12 +582,13 @@ if [[ "$headless_choice" =~ ^[Yy]$ ]]; then
 else
 	echo -e ""
 	echo -e "  ${MUTED}Keeping dashboard local-only (localhost:4242)...${NC}"
-	proton-drive-sync config --set dashboard_host=127.0.0.1
 
-	# Install libsecret without headless extras
+	# Install libsecret without headless extras (must happen before proton-drive-sync commands)
 	if [ "$os" = "linux" ]; then
 		install_libsecret false
 	fi
+
+	proton-drive-sync config --set dashboard_host=127.0.0.1
 fi
 
 # Run auth flow

@@ -22,6 +22,12 @@ fi
 eval "$(echo "$KEYRING_PASSWORD" | gnome-keyring-daemon --login --replace)"
 eval "$(gnome-keyring-daemon --start --components=secrets)"
 
+# Create the "login" collection if it doesn't exist by storing a bootstrap secret
+# This is required on headless systems where the collection isn't auto-created
+if command -v secret-tool >/dev/null 2>&1; then
+	secret-tool store --label="proton-drive-sync-bootstrap" service proton-drive-sync-bootstrap account bootstrap <<<"bootstrap" 2>/dev/null || true
+fi
+
 # Export environment variables to file for other services
 cat >"$KEYRING_ENV_FILE" <<EOF
 DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS"
