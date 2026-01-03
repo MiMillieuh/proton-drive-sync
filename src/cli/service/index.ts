@@ -7,25 +7,10 @@
  * - Windows: Task Scheduler
  */
 
-import * as readline from 'readline';
 import { sendSignal } from '../../signals.js';
 import { hasFlag, FLAGS } from '../../flags.js';
 import { logger } from '../../logger.js';
 import type { ServiceOperations, InstallScope } from './types.js';
-
-function askYesNo(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(`${question} (y/n): `, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-    });
-  });
-}
 
 function getBinPathSafe(): string | null {
   const cmd = process.platform === 'win32' ? 'where' : 'which';
@@ -97,13 +82,7 @@ export async function serviceInstallCommand(
   }
 
   const service = await getServiceManager(scope);
-
-  const installSync = interactive ? await askYesNo('Install proton-drive-sync service?') : true;
-  if (installSync) {
-    await service.install(binPath, keyringPassword);
-  } else {
-    logger.info('Skipping proton-drive-sync service.');
-  }
+  await service.install(binPath, keyringPassword);
 }
 
 export async function serviceUninstallCommand(
@@ -129,12 +108,7 @@ export async function serviceUninstallCommand(
     return;
   }
 
-  const uninstallSync = interactive ? await askYesNo('Uninstall proton-drive-sync service?') : true;
-  if (uninstallSync) {
-    await service.uninstall(interactive);
-  } else {
-    logger.info('Skipping proton-drive-sync service.');
-  }
+  await service.uninstall(interactive);
 }
 
 /**

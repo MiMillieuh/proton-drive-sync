@@ -19,6 +19,7 @@ import {
 import type { InstallScope } from './cli/service/types.js';
 import { stopCommand } from './cli/stop.js';
 import { startCommand } from './cli/start.js';
+import { statusCommand } from './cli/status.js';
 import { dashboardCommand } from './cli/dashboard.js';
 
 const { version } = (await import('../package.json')).default;
@@ -79,6 +80,11 @@ program
   .command('stop')
   .description('Stop any running proton-drive-sync process')
   .action(stopCommand);
+
+program
+  .command('status')
+  .description('Check if the sync service is running (JSON output)')
+  .action(statusCommand);
 
 program
   .command('pause')

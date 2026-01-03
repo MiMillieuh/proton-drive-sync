@@ -510,9 +510,7 @@ if [ "$os" = "linux" ]; then
 	fi
 else
 	# macOS/Windows - only user scope supported
-	echo -e "  Start sync service automatically on login?"
-	echo -e ""
-	read -p "  Install service? [Y/n]: " login_choice
+	read -p "  Start sync service automatically on login? [Y/n]: " login_choice
 
 	if [[ ! "$login_choice" =~ ^[Nn]$ ]]; then
 		echo -e ""
@@ -520,14 +518,10 @@ else
 		proton-drive-sync service install
 	else
 		echo -e ""
-		echo -e "  ${MUTED}Skipping service installation.${NC}"
-		echo -e "  ${MUTED}You can install it later with: proton-drive-sync service install${NC}"
+		echo -e "  ${MUTED}Skipping automatic startup.${NC}"
+		echo -e "  ${MUTED}You can enable it later with: proton-drive-sync service install${NC}"
 	fi
 fi
-
-echo -e ""
-echo -e "${MUTED}Proton Drive Sync is now running!${NC}"
-echo -e ""
 
 # Open browser (platform-specific)
 open_browser() {
@@ -543,9 +537,37 @@ open_browser() {
 	fi
 }
 
-if [ "$DASHBOARD_HOST" != "0.0.0.0" ]; then
-	echo -e "${MUTED}Opening dashboard...${NC}"
-	open_browser "http://localhost:4242"
+# Wait for service to be ready
+echo -e ""
+echo -e "${MUTED}Waiting for service to start...${NC}"
+max_attempts=30
+attempt=0
+port=4242
+status=""
+
+while [ $attempt -lt $max_attempts ]; do
+	status_json=$(proton-drive-sync status 2>/dev/null)
+	if [ $? -eq 0 ]; then
+		status=$(echo "$status_json" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+		port=$(echo "$status_json" | grep -o '"port":[0-9]*' | cut -d':' -f2)
+		if [ "$status" = "running" ]; then
+			break
+		fi
+	fi
+	sleep 1
+	attempt=$((attempt + 1))
+done
+
+if [ "$status" = "running" ]; then
+	echo -e "${GREEN}✔${NC} Service started successfully"
+	echo -e ""
+	if [ "$DASHBOARD_HOST" != "0.0.0.0" ]; then
+		echo -e "${MUTED}Opening dashboard...${NC}"
+		open_browser "http://localhost:${port:-4242}"
+	fi
+else
+	echo -e "${RED}Warning: Service did not start within 30 seconds${NC}"
+	echo -e "${MUTED}Check logs with: proton-drive-sync logs${NC}"
 fi
 
 echo -e ""
