@@ -22,11 +22,16 @@ fi
 eval "$(echo "$KEYRING_PASSWORD" | gnome-keyring-daemon --login --replace)"
 eval "$(gnome-keyring-daemon --start --components=secrets)"
 
-# Create the "login" collection if it doesn't exist by storing a bootstrap secret
+# Create the "login" collection if it doesn't exist
 # This is required on headless systems where the collection isn't auto-created
-if command -v secret-tool >/dev/null 2>&1; then
-	secret-tool store --label="proton-drive-sync-bootstrap" service proton-drive-sync-bootstrap account bootstrap <<<"bootstrap" 2>/dev/null || true
-fi
+python3 -c "
+import secretstorage
+conn = secretstorage.dbus_init()
+try:
+    secretstorage.collection.create_collection(conn, 'Login', alias='default')
+except secretstorage.exceptions.ItemExists:
+    pass
+" 2>/dev/null || true
 
 # Export environment variables to file for other services
 cat >"$KEYRING_ENV_FILE" <<EOF

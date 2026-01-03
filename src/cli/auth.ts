@@ -146,7 +146,14 @@ export async function createClientFromTokens(
   return createProtonDriveClientFromSession(session, sdkDebug);
 }
 
-export async function authCommand(): Promise<void> {
+export async function authCommand(options: { logout?: boolean } = {}): Promise<void> {
+  // Handle logout flag
+  if (options.logout) {
+    await deleteStoredCredentials();
+    logger.info('Credentials cleared from keychain.');
+    return;
+  }
+
   // Read from environment variables first, then prompt interactively
   const username = process.env.PROTON_USERNAME || (await input({ message: 'Proton username:' }));
   const pwd = process.env.PROTON_PASSWORD || (await password({ message: 'Password:' }));

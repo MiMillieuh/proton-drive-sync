@@ -42,6 +42,7 @@ program.hook('preAction', (thisCommand) => {
 program
   .command('auth')
   .description('Authenticate and save credentials securely')
+  .option('--logout', 'Clear stored credentials from keychain')
   .action(authCommand);
 
 program

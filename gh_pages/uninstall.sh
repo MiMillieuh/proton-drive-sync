@@ -118,11 +118,6 @@ if [[ -d "$CONFIG_DIR" ]] || [[ -d "$STATE_DIR" ]]; then
 	echo -e ""
 fi
 
-# Clean up headless keyring bootstrap secret (if exists)
-if command -v secret-tool >/dev/null 2>&1; then
-	secret-tool clear service proton-drive-sync-bootstrap account bootstrap 2>/dev/null || true
-fi
-
 # Prompt user about Watchman
 if command -v watchman >/dev/null 2>&1; then
 	echo -e "${MUTED}Watchman is still installed on your system.${NC}"
