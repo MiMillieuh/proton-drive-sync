@@ -19,7 +19,7 @@ if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
 fi
 
 # Start gnome-keyring-daemon with login to unlock
-eval "$(echo "$KEYRING_PASSWORD" | gnome-keyring-daemon --login --replace)"
+eval "$(echo "$KEYRING_PASSWORD" | gnome-keyring-daemon --login)"
 eval "$(gnome-keyring-daemon --start --components=secrets)"
 
 # Create the "login" collection if it doesn't exist
