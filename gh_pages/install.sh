@@ -553,22 +553,11 @@ echo -e ""
 if [ "$os" = "linux" ]; then
 	export KEYRING_PASSWORD="proton-drive-sync"
 
-	# For system service installs, run auth with sudo but preserve XDG_CONFIG_HOME
-	# so credentials are stored in the user's config dir (where the service will look)
-	if [ "${service_choice:-}" = "2" ]; then
-		if ! sudo XDG_CONFIG_HOME="$HOME/.config" KEYRING_PASSWORD="proton-drive-sync" "$INSTALL_DIR/proton-drive-sync" auth; then
-			echo -e ""
-			echo -e "${RED}Authentication failed or was cancelled.${NC}"
-			echo -e "${MUTED}Run the install command again to retry.${NC}"
-			exit 1
-		fi
-	else
-		if ! "$INSTALL_DIR/proton-drive-sync" auth; then
-			echo -e ""
-			echo -e "${RED}Authentication failed or was cancelled.${NC}"
-			echo -e "${MUTED}Run the install command again to retry.${NC}"
-			exit 1
-		fi
+	if ! "$INSTALL_DIR/proton-drive-sync" auth; then
+		echo -e ""
+		echo -e "${RED}Authentication failed or was cancelled.${NC}"
+		echo -e "${MUTED}Run the install command again to retry.${NC}"
+		exit 1
 	fi
 else
 	# macOS - no KEYRING_PASSWORD needed, uses Keychain
