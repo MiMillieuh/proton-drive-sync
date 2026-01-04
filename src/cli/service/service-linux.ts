@@ -79,6 +79,21 @@ function getCurrentUid(): number {
   return process.getuid?.() ?? 1000;
 }
 
+function getUserHome(): string {
+  // When running as root via sudo, get the home directory of the original user
+  const sudoUser = process.env.SUDO_USER;
+  if (sudoUser) {
+    const result = Bun.spawnSync(['getent', 'passwd', sudoUser]);
+    const output = new TextDecoder().decode(result.stdout).trim();
+    // getent passwd returns: username:x:uid:gid:comment:home:shell
+    const parts = output.split(':');
+    if (parts.length >= 6 && parts[5]) {
+      return parts[5];
+    }
+  }
+  return homedir();
+}
+
 function runSystemctl(
   scope: InstallScope,
   ...args: string[]
@@ -103,7 +118,7 @@ function daemonReload(scope: InstallScope): boolean {
 // ============================================================================
 
 function generateServiceFile(binPath: string, password: string, scope: InstallScope): string {
-  const home = homedir();
+  const home = getUserHome();
   const uid = getCurrentUid();
 
   let content = serviceTemplate
