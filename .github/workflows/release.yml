@@ -83,10 +83,10 @@ jobs:
       - name: Install Watchman (Linux ARM64)
         if: runner.os == 'Linux' && matrix.target == 'linux-arm64'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgoogle-glog-dev libboost-all-dev libgflags-dev libevent-dev libdouble-conversion-dev libssl-dev libsnappy1v5 libzstd1 liblz4-1 libunwind8
-          curl -L -o watchman.deb "https://www.damianb.dev/proton-drive-sync/watchman_2025.12.28.00_arm64.deb"
-          sudo dpkg -i watchman.deb
+          sudo apt-get update -qq
+          sudo apt-get install -y libssl3
+          curl -fsSL -o watchman.deb "https://www.damianb.dev/proton-drive-sync/watchman_2025.12.29.00_arm64.deb"
+          sudo apt-get install -y ./watchman.deb
 
       - name: Install Watchman (Windows)
         if: runner.os == 'Windows'
