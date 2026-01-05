@@ -4,15 +4,15 @@
  * Handles Watchman client management, file change detection, and subscriptions.
  */
 
-import { realpathSync } from 'fs';
-import { basename } from 'path';
+import { existsSync, realpathSync, writeFileSync } from 'fs';
+import { basename, join } from 'path';
 import watchman from 'fb-watchman';
 import { getClock, setClock } from '../state.js';
 import { logger } from '../logger.js';
 import { setFlag, clearFlag, getFlagData, FLAGS, WATCHMAN_STATE, ALL_VARIANTS } from '../flags.js';
 import { sendSignal } from '../signals.js';
 import { getConfig, type Config } from '../config.js';
-import { WATCHMAN_SUB_NAME } from './constants.js';
+import { WATCHMAN_SUB_NAME, WATCHMAN_SETTLE_MS } from './constants.js';
 
 // ============================================================================
 // Types
@@ -44,6 +44,9 @@ export type FileChangeBatchHandler = (files: FileChange[]) => void;
 
 /** Track active subscription names for teardown */
 let activeSubscriptions: { root: string; subName: string }[] = [];
+
+/** Map subscription name -> configured source path (resolved) for event routing */
+const subscriptionToSourcePath: Map<string, string> = new Map();
 
 // ============================================================================
 // Watchman Client
@@ -101,6 +104,35 @@ export function shutdownWatchman(): void {
     Bun.spawnSync(['watchman', 'shutdown-server']);
   }
   clearFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
+}
+
+// ============================================================================
+// Watchman Config
+// ============================================================================
+
+/**
+ * Ensures a .watchmanconfig file exists in the watch directory with settle configuration.
+ * Only creates the file if it doesn't already exist (respects user config).
+ */
+function ensureWatchmanConfig(watchDir: string): void {
+  const configPath = join(watchDir, '.watchmanconfig');
+
+  if (existsSync(configPath)) {
+    logger.debug(`[watchman] .watchmanconfig already exists at ${configPath}, skipping`);
+    return;
+  }
+
+  const config = { settle: WATCHMAN_SETTLE_MS };
+  try {
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    logger.info(
+      `[watchman] Created .watchmanconfig in ${watchDir} with settle: ${WATCHMAN_SETTLE_MS}ms`
+    );
+  } catch (err) {
+    logger.warn(
+      `[watchman] Failed to create .watchmanconfig in ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
 }
 
 // ============================================================================
@@ -163,15 +195,11 @@ function unsubscribeWatchman(root: string, subName: string): Promise<void> {
 interface WatchmanQueryOptions {
   savedClock: string | null;
   relative: string;
-  /** Wait for filesystem to settle before delivering events (milliseconds) */
-  settlePeriod?: number;
-  /** Max time to wait for settle period to be satisfied (milliseconds) */
-  settleTimeout?: number;
 }
 
 /** Build a Watchman query/subscription object */
 function buildWatchmanQuery(options: WatchmanQueryOptions): Record<string, unknown> {
-  const { savedClock, relative, settlePeriod, settleTimeout } = options;
+  const { savedClock, relative } = options;
 
   const query: Record<string, unknown> = {
     expression: ['anyof', ['type', 'f'], ['type', 'd']],
@@ -184,12 +212,6 @@ function buildWatchmanQuery(options: WatchmanQueryOptions): Record<string, unkno
 
   if (relative) {
     query.relative_root = relative;
-  }
-
-  // Settle parameters must be specified together
-  if (settlePeriod !== undefined && settleTimeout !== undefined) {
-    query.settle_period = settlePeriod;
-    query.settle_timeout = settleTimeout;
   }
 
   return query;
@@ -280,22 +302,29 @@ export async function setupWatchSubscriptions(
     );
     logger.debug(`[watchman] subscription payload:\n${JSON.stringify(resp, null, 2)}`);
 
-    // Use Watchman's root directly instead of parsing from subscription name
-    const watchRoot = (resp as unknown as { root: string }).root;
+    // Look up the configured source path from the subscription name
+    // This handles cases where Watchman's watch root differs from configured path
+    // (e.g., watching /Users/foo/Documents/lotsofstuff but Watchman returns root=/Users/foo/Documents)
+    const resolvedRoot = subscriptionToSourcePath.get(resp.subscription);
 
-    // Use getConfig() to get fresh config instead of stale closure
-    const currentConfig = getConfig();
-    const syncDir = currentConfig.sync_dirs.find((d) => realpathSync(d.source_path) === watchRoot);
-
-    if (!syncDir) {
-      // This can happen legitimately during config transitions or stale events
-      logger.warn(
-        `Ignoring event for unknown watch root: ${watchRoot} (subscription: ${resp.subscription})`
-      );
+    if (!resolvedRoot) {
+      logger.warn(`Ignoring event for unknown subscription: ${resp.subscription}`);
       return;
     }
 
-    const resolvedRoot = watchRoot;
+    // Verify the sync dir still exists in config (may have been removed)
+    const currentConfig = getConfig();
+    const syncDir = currentConfig.sync_dirs.find(
+      (d) => realpathSync(d.source_path) === resolvedRoot
+    );
+
+    if (!syncDir) {
+      // This can happen legitimately during config transitions
+      logger.warn(
+        `Ignoring event for removed sync dir: ${resolvedRoot} (subscription: ${resp.subscription})`
+      );
+      return;
+    }
 
     // Process files as a batch
     const fileChanges: FileChange[] = resp.files.map((file) => {
@@ -324,10 +353,17 @@ export async function setupWatchSubscriptions(
       const watchDir = realpathSync(dir.source_path);
       const subName = `${WATCHMAN_SUB_NAME}-${basename(watchDir)}`;
 
+      // Ensure .watchmanconfig exists with settle configuration before registering watch
+      ensureWatchmanConfig(watchDir);
+
       // Register directory with Watchman
       const watchResp = await registerWithWatchman(watchDir);
       const root = watchResp.watch;
       const relative = watchResp.relative_path || '';
+
+      logger.debug(
+        `[watchman] watch-project response for ${watchDir}: root=${root}, relative_path="${relative}"`
+      );
 
       // Use saved clock for this directory or null for initial sync
       const savedClock = getClock(watchDir);
@@ -338,18 +374,16 @@ export async function setupWatchSubscriptions(
         logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
       }
 
-      // Wait for filesystem to settle before delivering events
-      // This prevents premature processing of files still being written
+      // TODO: Re-enable settle parameters after debugging
       const sub = buildWatchmanQuery({
         savedClock,
         relative,
-        settlePeriod: 2000, // 2 seconds of no changes before delivering
-        settleTimeout: 10000, // Max 10 seconds wait if changes keep coming
       });
 
-      // Register subscription
+      // Register subscription and store mapping for event routing
       await subscribeWatchman(root, subName, sub);
       activeSubscriptions.push({ root, subName });
+      subscriptionToSourcePath.set(subName, watchDir);
       logger.info(`Watching ${dir.source_path} for changes...`);
     })
   );
@@ -382,4 +416,5 @@ export async function teardownWatchSubscriptions(): Promise<void> {
   );
 
   activeSubscriptions = [];
+  subscriptionToSourcePath.clear();
 }

@@ -81,3 +81,6 @@ export const MAX_RETRIES: Record<ErrorCategory, number> = {
 
 /** Watchman subscription name prefix */
 export const WATCHMAN_SUB_NAME = 'proton-drive-sync';
+
+/** Settle period in milliseconds - how long filesystem should be idle before dispatching */
+export const WATCHMAN_SETTLE_MS = 2000;
