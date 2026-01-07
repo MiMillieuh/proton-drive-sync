@@ -3,27 +3,6 @@
 ## Requirements
 
 - [Bun](https://bun.sh) - JavaScript runtime and package manager
-- [Watchman](https://facebook.github.io/watchman/) - Required only for `make dev` hot-reload (not needed for production)
-
-### Installing Watchman (for development only)
-
-Watchman is used by `make dev` for hot-reload during development. It is **not** required for production use.
-
-```bash
-# macOS
-brew install watchman
-
-# Linux (Ubuntu/Debian)
-sudo apt-get install watchman
-
-# Linux (from source) - see https://facebook.github.io/watchman/docs/install
-```
-
-On Linux, you may also need `pywatchman` for the `watchman-wait` command:
-
-```bash
-pip install pywatchman
-```
 
 ## Setup
 

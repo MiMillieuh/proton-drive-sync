@@ -205,7 +205,7 @@ This removes all configuration, credentials, and sync state. You'll need to re-a
 
 The container runs a single process that manages:
 
-1. **File Watcher** - Native file system monitoring via @parcel/watcher
+1. **File Watcher** - Native file system monitoring via fs.watch
 2. **Sync Engine** - Queues and processes file changes
 3. **Dashboard** - Web UI on port 4242
 

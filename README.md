@@ -67,22 +67,22 @@ The dashboard runs locally at http://localhost:4242. Use it to configure and man
 
 4. For more advanced commands, see: `proton-drive-sync --help`
 
-### Uninstall: macOS / Linux
+### Uninstall
+
+To completely uninstall proton-drive-sync:
 
 ```bash
-$ bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/uninstall.sh)
+proton-drive-sync self-uninstall
 ```
 
-<details>
-<summary>Uninstall: Windows</summary>
+This will:
 
-Run the following command in PowerShell:
+- Stop and remove the system service
+- Clear stored credentials from your keychain
+- Clean up PATH environment entries
+- Optionally delete configuration and sync history
 
-```powershell
-irm https://www.damianb.dev/proton-drive-sync/uninstall.ps1 | iex
-```
-
-</details>
+After running, manually delete the binary at the location shown.
 
 ## Development
 

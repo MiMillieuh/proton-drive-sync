@@ -21,7 +21,7 @@ import {
   closeWatcher,
   queryAllChanges,
   setupWatchSubscriptions,
-  cleanupOrphanedSnapshots,
+  triggerFullReconciliation,
   type FileChange,
 } from './watcher.js';
 import { enqueueJob, cleanupOrphanedJobs } from './queue.js';
@@ -161,7 +161,7 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
       // Check if we need DELETE_AND_CREATE (no mapping, or content changed for files)
       const noMapping = !nodeMapping;
       const storedHash = isFile ? getStoredHash(from.localPath, tx) : null;
-      // Use mtime:size as change indicator (no content hashing with @parcel/watcher)
+      // Use mtime:size as change indicator
       const newHash = `${to.mtime_ms}:${to.size}`;
       const contentChanged = isFile && storedHash && storedHash !== newHash;
 
@@ -351,10 +351,8 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
   });
 
   // Query all changes and enqueue jobs (batch handler)
-  const totalChanges = await queryAllChanges(
-    config,
-    (files) => handleFileChangeBatch(files, config, dryRun),
-    dryRun
+  const totalChanges = await queryAllChanges(config, (files) =>
+    handleFileChangeBatch(files, config, dryRun)
   );
 
   if (totalChanges === 0) {
@@ -396,10 +394,9 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
     cleanupOrphanedHashes(tx);
     cleanupOrphanedNodeMappings(tx);
   });
-  cleanupOrphanedSnapshots(config);
 
   // Set up file watching
-  await setupWatchSubscriptions(config, createBatchHandler(), dryRun);
+  await setupWatchSubscriptions(config, createBatchHandler());
 
   // Wire up config change handlers
   onConfigChange('sync_concurrency', () => {
@@ -414,12 +411,19 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
       cleanupOrphanedHashes(tx);
       cleanupOrphanedNodeMappings(tx);
     });
-    cleanupOrphanedSnapshots(newConfig);
-    await setupWatchSubscriptions(newConfig, createBatchHandler(), dryRun);
+    await setupWatchSubscriptions(newConfig, createBatchHandler());
   });
 
   // Start the job processor loop
   const processorHandle = startJobProcessorLoop(client, dryRun);
+
+  // Register reconcile signal handler
+  const handleReconcile = async (): Promise<void> => {
+    logger.info('Reconcile signal received, starting full filesystem scan...');
+    const currentConfig = getConfig();
+    await triggerFullReconciliation(currentConfig, createBatchHandler());
+  };
+  registerSignalHandler('reconcile', handleReconcile);
 
   // Wait for stop signal
   await new Promise<void>((resolve) => {

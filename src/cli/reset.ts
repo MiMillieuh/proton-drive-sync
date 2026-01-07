@@ -55,10 +55,10 @@ export async function resetCommand(options: {
       tx.delete(schema.nodeMapping).run();
     });
 
-    // Clear @parcel/watcher snapshots to force full resync
+    // Clear file hashes to force full resync
     const snapshotsCleared = clearAllSnapshots();
     if (snapshotsCleared > 0) {
-      logger.info(`Cleared ${snapshotsCleared} snapshot(s).`);
+      logger.info(`Cleared ${snapshotsCleared} file hash(es).`);
     }
 
     logger.info('State reset.');

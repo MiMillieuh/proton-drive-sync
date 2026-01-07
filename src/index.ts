@@ -21,6 +21,8 @@ import { stopCommand } from './cli/stop.js';
 import { startCommand } from './cli/start.js';
 import { statusCommand } from './cli/status.js';
 import { dashboardCommand } from './cli/dashboard.js';
+import { selfUninstallCommand } from './cli/self-uninstall.js';
+import { reconcileCommand } from './cli/reconcile.js';
 
 const { version } = (await import('../package.json')).default;
 
@@ -129,5 +131,16 @@ serviceCommand
   .description('Unload the service (will reload on next boot)')
   .option('--install-scope <scope>', 'Install scope: user or system (Linux only)', 'user')
   .action((options) => serviceUnloadCommand(options.installScope as InstallScope));
+
+program
+  .command('self-uninstall')
+  .description('Completely uninstall proton-drive-sync')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(selfUninstallCommand);
+
+program
+  .command('reconcile')
+  .description('Trigger full filesystem scan on running daemon')
+  .action(reconcileCommand);
 
 program.parse();

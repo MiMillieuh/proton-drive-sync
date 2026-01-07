@@ -11,11 +11,11 @@ export { runOneShotSync, runWatchMode, type SyncOptions } from './engine.js';
 export {
   initializeWatcher,
   closeWatcher,
-  writeSnapshots,
-  cleanupOrphanedSnapshots,
+  clearAllSnapshots,
   queryAllChanges,
   setupWatchSubscriptions,
   teardownWatchSubscriptions,
+  triggerFullReconciliation,
   type FileChange,
   type FileChangeHandler,
 } from './watcher.js';

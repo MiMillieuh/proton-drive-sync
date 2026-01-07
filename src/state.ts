@@ -10,8 +10,5 @@ import { STATE_DIR } from './db/index.js';
 // Re-export STATE_DIR for other modules
 export { STATE_DIR };
 
-// Note: Clock management has been removed. The watcher now uses file-based
-// snapshots managed by @parcel/watcher. See src/sync/watcher.ts for
-// snapshot management functions:
-// - writeSnapshots(config)
-// - cleanupOrphanedSnapshots(config)
+// Note: Clock management has been removed. The watcher now uses the fileHashes
+// database table for change detection. See src/sync/watcher.ts for details.

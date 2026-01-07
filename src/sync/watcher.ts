@@ -1,17 +1,17 @@
 /**
- * File Watcher (@parcel/watcher)
+ * File Watcher (fs.watch)
  *
- * Handles file change detection using @parcel/watcher with snapshot-based
- * incremental sync and inode-based rename detection.
+ * Handles file change detection using Node's built-in fs.watch with
+ * fileHashes DB table for persistence and change detection.
  */
 
-import { existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
-import { basename, join } from 'path';
-import { createHash } from 'crypto';
-import watcher, { type AsyncSubscription, type Event } from '@parcel/watcher';
+import { watch, type FSWatcher, statSync, existsSync } from 'fs';
+import { join, relative } from 'path';
+import { eq, like } from 'drizzle-orm';
 import { logger } from '../logger.js';
-import { getConfig, type Config } from '../config.js';
-import { getStateDir } from '../paths.js';
+import { type Config } from '../config.js';
+import { db } from '../db/index.js';
+import { fileHashes } from '../db/schema.js';
 
 // ============================================================================
 // Types
@@ -25,8 +25,7 @@ export interface FileChange {
   type: 'f' | 'd'; // 'f' for file, 'd' for directory
   new: boolean; // true if file is newly created
   watchRoot: string; // Which watch root this change came from
-  ino: number; // Inode number - stable across renames/moves within same filesystem
-  'content.sha1hex'?: string; // Not used with @parcel/watcher (mtime+size used instead)
+  ino: number; // Inode number (0 if unavailable)
 }
 
 export type FileChangeHandler = (file: FileChange) => void;
@@ -36,224 +35,169 @@ export type FileChangeBatchHandler = (files: FileChange[]) => void;
 // Constants
 // ============================================================================
 
-const SNAPSHOTS_DIR = 'snapshots';
+const DEBOUNCE_MS = 200;
+const RECONCILIATION_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ============================================================================
 // State
 // ============================================================================
 
-/** Track active subscriptions for teardown */
-const activeSubscriptions: Map<string, AsyncSubscription> = new Map();
+/** Track active fs.watch watchers for teardown */
+const activeWatchers: Map<string, FSWatcher> = new Map();
+
+/** Track paths with recent events for incremental reconciliation */
+const dirtyPaths: Set<string> = new Set();
+
+/** Debounce timers per path */
+const debounceTimers: Map<string, Timer> = new Map();
+
+/** Reconciliation timer */
+let reconciliationTimer: Timer | null = null;
+
+/** Stored references for reconciliation callback */
+let reconciliationConfig: Config | null = null;
+let reconciliationCallback: FileChangeBatchHandler | null = null;
 
 // ============================================================================
-// Snapshot Management
+// Hash Helpers
 // ============================================================================
 
 /**
- * Get the snapshots directory path
+ * Build a content hash from mtime and size (format: "mtime_ms:size")
  */
-function getSnapshotsDir(): string {
-  return join(getStateDir(), SNAPSHOTS_DIR);
+function buildHash(mtime_ms: number, size: number): string {
+  return `${mtime_ms}:${size}`;
 }
 
 /**
- * Ensure the snapshots directory exists
+ * Get stored hash for a path from the database
  */
-function ensureSnapshotsDir(): void {
-  const dir = getSnapshotsDir();
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+function getStoredHash(localPath: string): string | null {
+  const result = db.select().from(fileHashes).where(eq(fileHashes.localPath, localPath)).get();
+  return result?.contentHash ?? null;
+}
+
+/**
+ * Get all stored hashes under a sync directory
+ */
+function getAllStoredHashes(syncDirPath: string): Map<string, string> {
+  const pathPrefix = syncDirPath.endsWith('/') ? syncDirPath : `${syncDirPath}/`;
+  const results = db
+    .select()
+    .from(fileHashes)
+    .where(like(fileHashes.localPath, `${pathPrefix}%`))
+    .all();
+
+  const hashMap = new Map<string, string>();
+  for (const row of results) {
+    hashMap.set(row.localPath, row.contentHash);
   }
+  return hashMap;
 }
 
-/**
- * Get the snapshot file path for a given watch directory
- * Uses a hash of the directory path to handle special characters
- */
-function getSnapshotPath(watchDir: string): string {
-  const hash = createHash('sha256').update(watchDir).digest('hex').slice(0, 16);
-  return join(getSnapshotsDir(), `${hash}.snapshot`);
-}
+// ============================================================================
+// File System Scanning
+// ============================================================================
 
 /**
- * Check if a snapshot exists for a directory
+ * Scan a directory recursively and return all files/directories with their stats
  */
-function snapshotExists(watchDir: string): boolean {
-  return existsSync(getSnapshotPath(watchDir));
-}
+async function scanDirectory(
+  watchDir: string
+): Promise<Map<string, { size: number; mtime_ms: number; isDirectory: boolean; ino: number }>> {
+  const results = new Map<
+    string,
+    { size: number; mtime_ms: number; isDirectory: boolean; ino: number }
+  >();
 
-/**
- * Delete a snapshot file
- */
-function deleteSnapshot(watchDir: string): void {
-  const path = getSnapshotPath(watchDir);
-  if (existsSync(path)) {
-    unlinkSync(path);
-  }
-}
+  try {
+    // Use Bun.Glob to scan all files and directories
+    const glob = new Bun.Glob('**/*');
+    const entries = glob.scanSync({ cwd: watchDir, dot: false });
 
-/**
- * Write snapshots for all watched directories
- */
-export async function writeSnapshots(config: Config): Promise<void> {
-  ensureSnapshotsDir();
-  await Promise.all(
-    config.sync_dirs.map(async (dir) => {
+    for (const entry of entries) {
+      const fullPath = join(watchDir, entry);
       try {
-        const snapshotPath = getSnapshotPath(dir.source_path);
-        await watcher.writeSnapshot(dir.source_path, snapshotPath);
-        logger.debug(`Wrote snapshot for ${dir.source_path}`);
-      } catch (err) {
-        logger.warn(
-          `Failed to write snapshot for ${dir.source_path}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    })
-  );
-}
-
-/**
- * Clear all snapshots (used by reset command to force full resync)
- * Returns the number of snapshots cleared
- */
-export function clearAllSnapshots(): number {
-  const snapshotsDir = getSnapshotsDir();
-  if (!existsSync(snapshotsDir)) return 0;
-
-  let cleared = 0;
-  const files = Bun.spawnSync(['ls', snapshotsDir]).stdout.toString().trim().split('\n');
-  for (const file of files) {
-    if (file && file.endsWith('.snapshot')) {
-      const fullPath = join(snapshotsDir, file);
-      try {
-        unlinkSync(fullPath);
-        cleared++;
+        const stats = statSync(fullPath);
+        results.set(fullPath, {
+          size: stats.size,
+          mtime_ms: stats.mtimeMs,
+          isDirectory: stats.isDirectory(),
+          ino: stats.ino,
+        });
       } catch {
-        // Ignore errors
+        // File may have been deleted during scan, skip it
       }
     }
+  } catch (err) {
+    logger.warn(
+      `Failed to scan directory ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
-  return cleared;
+  return results;
 }
 
 /**
- * Clean up orphaned snapshots (for directories no longer in config)
+ * Compare filesystem state against stored hashes and generate changes
  */
-export function cleanupOrphanedSnapshots(config: Config): void {
-  const snapshotsDir = getSnapshotsDir();
-  if (!existsSync(snapshotsDir)) return;
-
-  // Get valid snapshot hashes for current config
-  const validHashes = new Set(
-    config.sync_dirs.map((dir) => {
-      const hash = createHash('sha256').update(dir.source_path).digest('hex').slice(0, 16);
-      return `${hash}.snapshot`;
-    })
-  );
-
-  // Remove orphaned snapshots
-  const files = Bun.spawnSync(['ls', snapshotsDir]).stdout.toString().trim().split('\n');
-  for (const file of files) {
-    if (file && file.endsWith('.snapshot') && !validHashes.has(file)) {
-      const fullPath = join(snapshotsDir, file);
-      try {
-        unlinkSync(fullPath);
-        logger.debug(`Removed orphaned snapshot: ${file}`);
-      } catch {
-        // Ignore errors
-      }
-    }
-  }
-}
-
-// ============================================================================
-// Event Conversion
-// ============================================================================
-
-/**
- * Convert @parcel/watcher events to FileChange format
- * Includes stat calls to get size, mtime, and inode
- */
-function convertEvents(events: Event[], watchRoot: string): FileChange[] {
+function compareWithStoredHashes(
+  watchDir: string,
+  fsState: Map<string, { size: number; mtime_ms: number; isDirectory: boolean; ino: number }>,
+  storedHashes: Map<string, string>
+): FileChange[] {
   const changes: FileChange[] = [];
 
-  for (const event of events) {
-    const relativePath = event.path.startsWith(watchRoot)
-      ? event.path.slice(watchRoot.length + 1) // Remove watchRoot + leading slash
-      : event.path;
+  // Check for new and updated files
+  for (const [fullPath, stats] of fsState) {
+    const relativePath = relative(watchDir, fullPath);
+    const currentHash = buildHash(stats.mtime_ms, stats.size);
+    const storedHash = storedHashes.get(fullPath);
 
-    // Skip empty paths (root directory events)
-    if (!relativePath) continue;
+    if (!storedHash) {
+      // New file/directory
+      changes.push({
+        name: relativePath,
+        size: stats.size,
+        mtime_ms: stats.mtime_ms,
+        exists: true,
+        type: stats.isDirectory ? 'd' : 'f',
+        new: true,
+        watchRoot: watchDir,
+        ino: stats.ino,
+      });
+    } else if (storedHash !== currentHash && !stats.isDirectory) {
+      // File updated (only track changes for files, not directories)
+      changes.push({
+        name: relativePath,
+        size: stats.size,
+        mtime_ms: stats.mtime_ms,
+        exists: true,
+        type: 'f',
+        new: false,
+        watchRoot: watchDir,
+        ino: stats.ino,
+      });
+    }
+  }
 
-    if (event.type === 'delete') {
-      // For deletes, we don't have stat info
-      // Try to infer type from path (directories often lack extension)
-      // This is imperfect but rename detection will help
+  // Check for deleted files (in DB but not on filesystem)
+  for (const [storedPath] of storedHashes) {
+    if (!fsState.has(storedPath)) {
+      const relativePath = relative(watchDir, storedPath);
       changes.push({
         name: relativePath,
         size: 0,
         mtime_ms: Date.now(),
         exists: false,
-        type: 'f', // Default to file, rename detection will correct if needed
+        type: 'f', // We don't know if it was a file or directory
         new: false,
-        watchRoot,
-        ino: 0, // Unknown for deletes
+        watchRoot: watchDir,
+        ino: 0,
       });
-    } else {
-      // For create/update, get file stats
-      try {
-        const stats = statSync(event.path);
-        changes.push({
-          name: relativePath,
-          size: stats.size,
-          mtime_ms: stats.mtimeMs,
-          exists: true,
-          type: stats.isDirectory() ? 'd' : 'f',
-          new: event.type === 'create',
-          watchRoot,
-          ino: stats.ino,
-        });
-      } catch (err) {
-        // File may have been deleted between event and stat
-        logger.debug(
-          `Failed to stat ${event.path}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
     }
   }
 
-  return changes;
-}
-
-/**
- * Enhance delete events with inode information by looking up from create events
- * This enables rename/move detection across delete+create pairs
- */
-function enhanceDeletesWithInodes(changes: FileChange[]): FileChange[] {
-  // Build a map of paths to inodes from creates
-  const createInodes = new Map<string, { ino: number; type: 'f' | 'd' }>();
-  for (const change of changes) {
-    if (change.exists && change.ino > 0) {
-      createInodes.set(change.name, { ino: change.ino, type: change.type });
-    }
-  }
-
-  // For deletes at the same basename, try to find a matching create with same inode
-  // This handles the case where we get delete+create for a rename in the same batch
-  const inodesByBasename = new Map<string, { ino: number; type: 'f' | 'd'; path: string }[]>();
-  for (const change of changes) {
-    if (change.exists && change.ino > 0) {
-      const base = basename(change.name);
-      if (!inodesByBasename.has(base)) {
-        inodesByBasename.set(base, []);
-      }
-      inodesByBasename.get(base)!.push({ ino: change.ino, type: change.type, path: change.name });
-    }
-  }
-
-  // We can't truly know the inode for deletes without tracking state
-  // The engine's rename detection will work on create events which have inodes
   return changes;
 }
 
@@ -262,10 +206,9 @@ function enhanceDeletesWithInodes(changes: FileChange[]): FileChange[] {
 // ============================================================================
 
 /**
- * Initialize the watcher (no-op for @parcel/watcher - no daemon needed)
+ * Initialize the watcher (no-op for fs.watch - no daemon needed)
  */
 export async function initializeWatcher(): Promise<void> {
-  ensureSnapshotsDir();
   logger.debug('File watcher initialized');
 }
 
@@ -276,113 +219,131 @@ export async function closeWatcher(): Promise<void> {
   await teardownWatchSubscriptions();
 }
 
+/**
+ * Clear all stored file hashes (used by reset command to force full resync)
+ * Returns the number of hashes cleared
+ */
+export function clearAllSnapshots(): number {
+  const result = db.select().from(fileHashes).all();
+  const count = result.length;
+  db.delete(fileHashes).run();
+  return count;
+}
+
 // ============================================================================
-// One-shot Query
+// One-shot Query (Startup Scan)
 // ============================================================================
 
 /**
  * Query all configured directories for changes since last sync.
- * Uses snapshots for incremental sync when available.
+ * Compares filesystem state against fileHashes table.
  */
 export async function queryAllChanges(
   config: Config,
-  onFileChangeBatch: FileChangeBatchHandler,
-  dryRun: boolean
+  onFileChangeBatch: FileChangeBatchHandler
 ): Promise<number> {
   let totalChanges = 0;
-  ensureSnapshotsDir();
 
-  await Promise.all(
-    config.sync_dirs.map(async (dir) => {
-      const watchDir = dir.source_path;
-      const snapshotPath = getSnapshotPath(watchDir);
-      const hasSnapshot = snapshotExists(watchDir);
+  for (const dir of config.sync_dirs) {
+    const watchDir = dir.source_path;
 
-      let events: Event[];
+    if (!existsSync(watchDir)) {
+      logger.warn(`Sync directory does not exist: ${watchDir}`);
+      continue;
+    }
 
-      if (hasSnapshot) {
-        logger.info(`Syncing changes since last run for ${dir.source_path}...`);
-        try {
-          events = await watcher.getEventsSince(watchDir, snapshotPath);
-        } catch (err) {
-          logger.warn(
-            `Failed to read snapshot for ${watchDir}, doing full scan: ${err instanceof Error ? err.message : String(err)}`
-          );
-          // Delete corrupted snapshot and do full scan
-          deleteSnapshot(watchDir);
-          events = await getFullDirectoryEvents(watchDir);
-        }
-      } else {
-        logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
-        events = await getFullDirectoryEvents(watchDir);
-      }
+    // Get stored hashes for this sync directory
+    const storedHashes = getAllStoredHashes(watchDir);
+    const hasStoredState = storedHashes.size > 0;
 
-      // Convert events to FileChange format
-      const fileChanges = convertEvents(events, watchDir);
-      const enhancedChanges = enhanceDeletesWithInodes(fileChanges);
+    if (hasStoredState) {
+      logger.info(`Syncing changes since last run for ${dir.source_path}...`);
+    } else {
+      logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
+    }
 
-      if (enhancedChanges.length > 0) {
-        onFileChangeBatch(enhancedChanges);
-        totalChanges += enhancedChanges.length;
-      }
+    // Scan the filesystem
+    const fsState = await scanDirectory(watchDir);
 
-      // Write new snapshot after processing (unless dry run)
-      if (!dryRun) {
-        try {
-          await watcher.writeSnapshot(watchDir, snapshotPath);
-        } catch (err) {
-          logger.warn(
-            `Failed to write snapshot for ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-    })
-  );
+    // Compare and generate changes
+    const changes = compareWithStoredHashes(watchDir, fsState, storedHashes);
+
+    if (changes.length > 0) {
+      onFileChangeBatch(changes);
+      totalChanges += changes.length;
+    }
+  }
 
   return totalChanges;
 }
 
+// ============================================================================
+// Live Watching (fs.watch)
+// ============================================================================
+
 /**
- * Get events representing all files in a directory (for first-run full sync)
+ * Handle a debounced file system event
  */
-async function getFullDirectoryEvents(watchDir: string): Promise<Event[]> {
-  const events: Event[] = [];
+function handleDebouncedEvent(
+  watchDir: string,
+  filename: string,
+  onFileChangeBatch: FileChangeBatchHandler
+): void {
+  const fullPath = join(watchDir, filename);
+  const relativePath = filename;
 
-  async function walk(dir: string): Promise<void> {
-    try {
-      const entries = (await Bun.file(dir).exists())
-        ? []
-        : Array.from(new Bun.Glob('**/*').scanSync({ cwd: dir, dot: false }));
+  // Add to dirty paths for incremental reconciliation
+  dirtyPaths.add(fullPath);
 
-      // Add the scanned files as create events
-      for (const entry of entries) {
-        const fullPath = join(dir, entry);
-        events.push({ type: 'create', path: fullPath });
+  try {
+    if (existsSync(fullPath)) {
+      // File exists - it's either a create or update
+      const stats = statSync(fullPath);
+      const currentHash = buildHash(stats.mtimeMs, stats.size);
+      const storedHash = getStoredHash(fullPath);
+
+      const isNew = !storedHash;
+      const isChanged = storedHash && storedHash !== currentHash;
+
+      // Skip if file hasn't actually changed
+      if (!isNew && !isChanged) {
+        logger.debug(`[watcher] no change detected: ${filename}`);
+        return;
       }
 
-      // Also need to include directories
-      const dirEntries = Array.from(new Bun.Glob('**/').scanSync({ cwd: dir, dot: false }));
-      for (const entry of dirEntries) {
-        const fullPath = join(dir, entry);
-        // Only add if not already in events
-        if (!events.some((e) => e.path === fullPath)) {
-          events.push({ type: 'create', path: fullPath });
-        }
-      }
-    } catch (err) {
-      logger.warn(
-        `Failed to scan directory ${dir}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      const change: FileChange = {
+        name: relativePath,
+        size: stats.size,
+        mtime_ms: stats.mtimeMs,
+        exists: true,
+        type: stats.isDirectory() ? 'd' : 'f',
+        new: isNew,
+        watchRoot: watchDir,
+        ino: stats.ino,
+      };
+
+      onFileChangeBatch([change]);
+    } else {
+      // File doesn't exist - it's a delete
+      const change: FileChange = {
+        name: relativePath,
+        size: 0,
+        mtime_ms: Date.now(),
+        exists: false,
+        type: 'f', // Default to file
+        new: false,
+        watchRoot: watchDir,
+        ino: 0,
+      };
+
+      onFileChangeBatch([change]);
     }
+  } catch (err) {
+    logger.debug(
+      `[watcher] Error handling event for ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
-
-  await walk(watchDir);
-  return events;
 }
-
-// ============================================================================
-// Watch Mode (Subscriptions)
-// ============================================================================
 
 /**
  * Set up watch subscriptions for all configured directories.
@@ -390,113 +351,59 @@ async function getFullDirectoryEvents(watchDir: string): Promise<Event[]> {
  */
 export async function setupWatchSubscriptions(
   config: Config,
-  onFileChangeBatch: FileChangeBatchHandler,
-  dryRun: boolean
+  onFileChangeBatch: FileChangeBatchHandler
 ): Promise<void> {
   // Clear any existing subscriptions first
   await teardownWatchSubscriptions();
-  ensureSnapshotsDir();
+
+  // Store references for reconciliation
+  reconciliationConfig = config;
+  reconciliationCallback = onFileChangeBatch;
 
   // Set up watches for all configured directories
-  await Promise.all(
-    config.sync_dirs.map(async (dir) => {
-      const watchDir = dir.source_path;
-      const snapshotPath = getSnapshotPath(watchDir);
-      const hasSnapshot = snapshotExists(watchDir);
+  for (const dir of config.sync_dirs) {
+    const watchDir = dir.source_path;
 
-      // Process initial state if no snapshot (first run)
-      if (!hasSnapshot) {
-        logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
-        const events = await getFullDirectoryEvents(watchDir);
-        const fileChanges = convertEvents(events, watchDir);
-        if (fileChanges.length > 0) {
-          onFileChangeBatch(fileChanges);
+    if (!existsSync(watchDir)) {
+      logger.warn(`Sync directory does not exist, skipping watch: ${watchDir}`);
+      continue;
+    }
+
+    try {
+      const fsWatcher = watch(watchDir, { recursive: true }, (eventType, filename) => {
+        if (!filename) return;
+
+        // Clear existing debounce timer for this path
+        const timerKey = `${watchDir}:${filename}`;
+        const existingTimer = debounceTimers.get(timerKey);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
         }
-      } else {
-        // Check for changes since last snapshot
-        logger.info(`Resuming ${dir.source_path} from last sync state...`);
-        try {
-          const events = await watcher.getEventsSince(watchDir, snapshotPath);
-          if (events.length > 0) {
-            const fileChanges = convertEvents(events, watchDir);
-            const enhancedChanges = enhanceDeletesWithInodes(fileChanges);
-            if (enhancedChanges.length > 0) {
-              onFileChangeBatch(enhancedChanges);
-            }
-          }
-        } catch (err) {
-          logger.warn(
-            `Failed to read snapshot, doing full scan: ${err instanceof Error ? err.message : String(err)}`
-          );
-          deleteSnapshot(watchDir);
-          const events = await getFullDirectoryEvents(watchDir);
-          const fileChanges = convertEvents(events, watchDir);
-          if (fileChanges.length > 0) {
-            onFileChangeBatch(fileChanges);
-          }
-        }
-      }
 
-      // Write initial snapshot
-      if (!dryRun) {
-        try {
-          await watcher.writeSnapshot(watchDir, snapshotPath);
-        } catch (err) {
-          logger.warn(
-            `Failed to write snapshot: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
+        // Set new debounce timer
+        const timer = setTimeout(() => {
+          debounceTimers.delete(timerKey);
+          handleDebouncedEvent(watchDir, filename, onFileChangeBatch);
+        }, DEBOUNCE_MS);
 
-      // Subscribe to future changes
-      try {
-        const subscription = await watcher.subscribe(watchDir, async (err, events) => {
-          if (err) {
-            logger.error(`Watcher error for ${watchDir}: ${err.message}`);
-            return;
-          }
+        debounceTimers.set(timerKey, timer);
+      });
 
-          // Verify the sync dir still exists in config
-          const currentConfig = getConfig();
-          const syncDir = currentConfig.sync_dirs.find((d) => d.source_path === watchDir);
+      fsWatcher.on('error', (err) => {
+        logger.error(`Watcher error for ${watchDir}: ${err.message}`);
+      });
 
-          if (!syncDir) {
-            logger.warn(`Ignoring event for removed sync dir: ${watchDir}`);
-            return;
-          }
+      activeWatchers.set(watchDir, fsWatcher);
+      logger.info(`Watching ${dir.source_path} for changes...`);
+    } catch (err) {
+      logger.error(
+        `Failed to watch ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
 
-          // Convert and process events
-          const fileChanges = convertEvents(events, watchDir);
-          const enhancedChanges = enhanceDeletesWithInodes(fileChanges);
-
-          if (enhancedChanges.length > 0) {
-            logger.debug(
-              `[watcher] subscription event: ${basename(watchDir)} (files: ${enhancedChanges.length})`
-            );
-            onFileChangeBatch(enhancedChanges);
-          }
-
-          // Update snapshot after processing
-          if (!dryRun) {
-            try {
-              await watcher.writeSnapshot(watchDir, snapshotPath);
-            } catch (writeErr) {
-              logger.warn(
-                `Failed to update snapshot: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`
-              );
-            }
-          }
-        });
-
-        activeSubscriptions.set(watchDir, subscription);
-        logger.info(`Watching ${dir.source_path} for changes...`);
-      } catch (err) {
-        logger.error(
-          `Failed to subscribe to ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    })
-  );
+  // Start incremental reconciliation timer
+  startReconciliationTimer();
 
   logger.info('Watching for file changes... (press Ctrl+C to exit)');
 }
@@ -506,21 +413,201 @@ export async function setupWatchSubscriptions(
  * Call this before re-setting up subscriptions on config change.
  */
 export async function teardownWatchSubscriptions(): Promise<void> {
-  if (activeSubscriptions.size === 0) return;
+  // Stop reconciliation timer
+  stopReconciliationTimer();
+
+  // Clear debounce timers
+  for (const timer of debounceTimers.values()) {
+    clearTimeout(timer);
+  }
+  debounceTimers.clear();
+
+  // Close all watchers
+  if (activeWatchers.size === 0) return;
 
   logger.info('Tearing down watch subscriptions...');
 
-  // Unsubscribe from all active subscriptions
-  await Promise.all(
-    Array.from(activeSubscriptions.entries()).map(async ([watchDir, subscription]) => {
-      try {
-        await subscription.unsubscribe();
-        logger.debug(`Unsubscribed from ${watchDir}`);
-      } catch (err) {
-        logger.warn(`Failed to unsubscribe from ${watchDir}: ${(err as Error).message}`);
-      }
-    })
-  );
+  for (const [watchDir, fsWatcher] of activeWatchers) {
+    try {
+      fsWatcher.close();
+      logger.debug(`Closed watcher for ${watchDir}`);
+    } catch (err) {
+      logger.warn(`Failed to close watcher for ${watchDir}: ${(err as Error).message}`);
+    }
+  }
 
-  activeSubscriptions.clear();
+  activeWatchers.clear();
+  dirtyPaths.clear();
+
+  // Clear reconciliation references
+  reconciliationConfig = null;
+  reconciliationCallback = null;
+}
+
+// ============================================================================
+// Incremental Reconciliation
+// ============================================================================
+
+/**
+ * Start the incremental reconciliation timer
+ */
+function startReconciliationTimer(): void {
+  if (reconciliationTimer) return;
+
+  reconciliationTimer = setInterval(() => {
+    runIncrementalReconciliation();
+  }, RECONCILIATION_INTERVAL_MS);
+}
+
+/**
+ * Stop the reconciliation timer
+ */
+function stopReconciliationTimer(): void {
+  if (reconciliationTimer) {
+    clearInterval(reconciliationTimer);
+    reconciliationTimer = null;
+  }
+}
+
+/**
+ * Run incremental reconciliation on dirty paths only
+ */
+function runIncrementalReconciliation(): void {
+  if (dirtyPaths.size === 0) {
+    logger.debug('[reconcile] No dirty paths to reconcile');
+    return;
+  }
+
+  if (!reconciliationCallback || !reconciliationConfig) {
+    logger.debug('[reconcile] No reconciliation callback configured');
+    return;
+  }
+
+  logger.debug(`[reconcile] Running incremental reconciliation on ${dirtyPaths.size} paths`);
+
+  const changes: FileChange[] = [];
+
+  // Group dirty paths by watch root
+  const pathsByRoot = new Map<string, string[]>();
+  for (const fullPath of dirtyPaths) {
+    const watchDir = reconciliationConfig.sync_dirs.find((d) =>
+      fullPath.startsWith(d.source_path)
+    )?.source_path;
+
+    if (watchDir) {
+      const paths = pathsByRoot.get(watchDir) || [];
+      paths.push(fullPath);
+      pathsByRoot.set(watchDir, paths);
+    }
+  }
+
+  // Check each dirty path
+  for (const [watchDir, paths] of pathsByRoot) {
+    for (const fullPath of paths) {
+      const relativePath = relative(watchDir, fullPath);
+      const storedHash = getStoredHash(fullPath);
+
+      try {
+        if (existsSync(fullPath)) {
+          const stats = statSync(fullPath);
+          const currentHash = buildHash(stats.mtimeMs, stats.size);
+
+          // Check if there's a discrepancy
+          if (!storedHash) {
+            // File exists but no hash stored - should have been created
+            changes.push({
+              name: relativePath,
+              size: stats.size,
+              mtime_ms: stats.mtimeMs,
+              exists: true,
+              type: stats.isDirectory() ? 'd' : 'f',
+              new: true,
+              watchRoot: watchDir,
+              ino: stats.ino,
+            });
+          } else if (storedHash !== currentHash && !stats.isDirectory()) {
+            // Hash mismatch - should have been updated
+            changes.push({
+              name: relativePath,
+              size: stats.size,
+              mtime_ms: stats.mtimeMs,
+              exists: true,
+              type: 'f',
+              new: false,
+              watchRoot: watchDir,
+              ino: stats.ino,
+            });
+          }
+        } else if (storedHash) {
+          // File doesn't exist but hash is stored - should have been deleted
+          changes.push({
+            name: relativePath,
+            size: 0,
+            mtime_ms: Date.now(),
+            exists: false,
+            type: 'f',
+            new: false,
+            watchRoot: watchDir,
+            ino: 0,
+          });
+        }
+      } catch (err) {
+        logger.debug(
+          `[reconcile] Error checking ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  // Clear dirty paths after reconciliation
+  dirtyPaths.clear();
+
+  // Emit any missed changes
+  if (changes.length > 0) {
+    logger.info(`[reconcile] Found ${changes.length} missed changes`);
+    reconciliationCallback(changes);
+  }
+}
+
+// ============================================================================
+// Full Reconciliation (for reconcile command)
+// ============================================================================
+
+/**
+ * Trigger a full filesystem reconciliation.
+ * Called by the reconcile CLI command via signal.
+ */
+export async function triggerFullReconciliation(
+  config: Config,
+  onFileChangeBatch: FileChangeBatchHandler
+): Promise<number> {
+  logger.info('Running full filesystem reconciliation...');
+
+  let totalChanges = 0;
+
+  for (const dir of config.sync_dirs) {
+    const watchDir = dir.source_path;
+
+    if (!existsSync(watchDir)) {
+      logger.warn(`Sync directory does not exist: ${watchDir}`);
+      continue;
+    }
+
+    // Get stored hashes for this sync directory
+    const storedHashes = getAllStoredHashes(watchDir);
+
+    // Scan the filesystem
+    const fsState = await scanDirectory(watchDir);
+
+    // Compare and generate changes
+    const changes = compareWithStoredHashes(watchDir, fsState, storedHashes);
+
+    if (changes.length > 0) {
+      onFileChangeBatch(changes);
+      totalChanges += changes.length;
+    }
+  }
+
+  logger.info(`Full reconciliation complete: ${totalChanges} changes found`);
+  return totalChanges;
 }
