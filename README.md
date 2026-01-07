@@ -10,8 +10,7 @@ https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1
 
 ## Installation
 
-<details>
-<summary>macOS (Homebrew)</summary>
+### macOS (Homebrew)
 
 ```bash
 brew tap DamianB-BitFlipper/tap
@@ -19,33 +18,33 @@ brew install proton-drive-sync
 proton-drive-sync setup
 ```
 
-</details>
-
-<details>
-<summary>Debian / Ubuntu</summary>
-
-Download the `.deb` package from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest):
+### Debian / Ubuntu
 
 ```bash
-# Download the .deb for your architecture (amd64 or arm64), then:
-sudo apt install ./proton-drive-sync_*.deb
+# For amd64:
+wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync_amd64.deb
+sudo apt install ./proton-drive-sync_amd64.deb
+
+# For arm64:
+wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync_arm64.deb
+sudo apt install ./proton-drive-sync_arm64.deb
+
 proton-drive-sync setup
 ```
 
-</details>
-
-<details>
-<summary>Fedora / RHEL / CentOS</summary>
-
-Download the `.rpm` package from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest):
+### Fedora / RHEL / CentOS
 
 ```bash
-# Download the .rpm for your architecture (x86_64 or aarch64), then:
-sudo dnf install ./proton-drive-sync-*.rpm
+# For x86_64:
+wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync.x86_64.rpm
+sudo dnf install ./proton-drive-sync.x86_64.rpm
+
+# For aarch64:
+wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync.aarch64.rpm
+sudo dnf install ./proton-drive-sync.aarch64.rpm
+
 proton-drive-sync setup
 ```
-
-</details>
 
 <details>
 <summary>Other Linux</summary>
