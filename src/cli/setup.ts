@@ -187,6 +187,23 @@ async function configureService(): Promise<boolean> {
       logger.info('You can start manually with: proton-drive-sync start');
       logger.info('You can enable it later with: proton-drive-sync service install');
       return false;
+    } else if (choice === 'system') {
+      // System-level install requires root - re-exec with sudo
+      const binPath = process.execPath;
+      logger.info('System service requires root privileges. Requesting sudo...');
+      const result = Bun.spawnSync(
+        ['sudo', binPath, 'service', 'install', '--install-scope', 'system'],
+        {
+          stdin: 'inherit',
+          stdout: 'inherit',
+          stderr: 'inherit',
+        }
+      );
+      if (result.exitCode !== 0) {
+        logger.error('Failed to install system service');
+        return false;
+      }
+      return true;
     } else {
       await serviceInstallCommand(true, choice as InstallScope);
       return true;
