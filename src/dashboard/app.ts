@@ -26,6 +26,7 @@ import {
 import { FLAGS, ONBOARDING_STATE, setFlag, clearFlag, hasFlag, getFlagData } from '../flags.js';
 import { sendSignal } from '../signals.js';
 import { logger, enableIpcLogging } from '../logger.js';
+import { chownToEffectiveUser } from '../paths.js';
 import {
   CONFIG_FILE,
   CONFIG_CHECK_SIGNAL,
@@ -1015,6 +1016,7 @@ app.post('/api/config', async (c) => {
 
     // Write to config file
     await Bun.write(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+    chownToEffectiveUser(CONFIG_FILE);
 
     // Update local state
     currentConfig = newConfig;
@@ -1085,6 +1087,7 @@ app.post('/api/add-directory', async (c) => {
 
     // Write to config file
     await Bun.write(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+    chownToEffectiveUser(CONFIG_FILE);
     currentConfig = newConfig;
 
     // Signal config reload

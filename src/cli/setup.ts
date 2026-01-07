@@ -20,6 +20,7 @@ import {
 } from '../config.js';
 import type { Config } from '../config.js';
 import { writeFileSync, existsSync } from 'fs';
+import { chownToEffectiveUser } from '../paths.js';
 import { authCommand } from './auth.js';
 import { serviceInstallCommand, isServiceInstalled } from './service/index.js';
 import type { InstallScope } from './service/types.js';
@@ -75,6 +76,7 @@ function loadOrCreateConfig(): Config {
       sync_concurrency: 4,
     };
     writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+    chownToEffectiveUser(CONFIG_FILE);
     logger.info(`Created default config file: ${CONFIG_FILE}`);
     return defaultConfig;
   }
@@ -84,6 +86,7 @@ function loadOrCreateConfig(): Config {
 function saveConfig(config: Config): void {
   ensureConfigDir();
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  chownToEffectiveUser(CONFIG_FILE);
 }
 
 function openBrowser(url: string): void {

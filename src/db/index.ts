@@ -4,13 +4,13 @@
  * SQLite database using Drizzle ORM for state persistence.
  */
 
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { Database } from 'bun:sqlite';
 import type { Changes } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema.js';
-import { getStateDir } from '../paths.js';
+import { getStateDir, ensureDir, chownToEffectiveUser } from '../paths.js';
 
 // Import migrations as text (embedded at compile time)
 // When adding new migrations, add a new import and entry to the migrations array below
@@ -106,12 +106,16 @@ async function runMigrations(sqlite: Database) {
 // ============================================================================
 
 async function initializeDatabase() {
-  // Ensure state directory exists
-  if (!existsSync(STATE_DIR)) {
-    mkdirSync(STATE_DIR, { recursive: true });
-  }
+  // Ensure state directory exists (and chown to sudo user if applicable)
+  ensureDir(STATE_DIR);
 
+  const dbExists = existsSync(DB_PATH);
   const sqlite = new Database(DB_PATH);
+
+  // Chown database file to sudo user if we just created it
+  if (!dbExists) {
+    chownToEffectiveUser(DB_PATH);
+  }
 
   // Configure SQLite for concurrent access (multiple processes may access the database)
   // WAL mode allows concurrent reads during writes and reduces lock contention
