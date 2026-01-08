@@ -197,11 +197,17 @@ async function configureService(): Promise<boolean> {
       if (process.platform === 'linux' && scope === 'system') {
         // System services require sudo to restart
         const binPath = process.execPath;
-        logger.info('Restarting system service (requires sudo)...');
-        const result = Bun.spawnSync(
-          ['sudo', '-E', binPath, 'service', 'load', '--install-scope', 'system'],
-          { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' }
-        );
+        const isRoot = process.getuid?.() === 0;
+        const command = isRoot
+          ? [binPath, 'service', 'load', '--install-scope', 'system']
+          : ['sudo', binPath, 'service', 'load', '--install-scope', 'system'];
+        logger.info('Restarting system service' + (isRoot ? '...' : ' (requires sudo)...'));
+        const result = Bun.spawnSync(command, {
+          stdin: 'inherit',
+          stdout: 'inherit',
+          stderr: 'inherit',
+          env: process.env,
+        });
         return result.exitCode === 0;
       } else {
         // User services (Linux user-level or macOS) can be restarted directly
@@ -230,17 +236,21 @@ async function configureService(): Promise<boolean> {
       logger.info('You can enable it later with: proton-drive-sync service install');
       return false;
     } else if (choice === 'system') {
-      // System-level install requires root - re-exec with sudo
+      // System-level install requires root - re-exec with sudo if not already root
       const binPath = process.execPath;
-      logger.info('System service requires root privileges. Requesting sudo...');
-      const result = Bun.spawnSync(
-        ['sudo', '-E', binPath, 'service', 'install', '--install-scope', 'system'],
-        {
-          stdin: 'inherit',
-          stdout: 'inherit',
-          stderr: 'inherit',
-        }
-      );
+      const isRoot = process.getuid?.() === 0;
+      const command = isRoot
+        ? [binPath, 'service', 'install', '--install-scope', 'system']
+        : ['sudo', binPath, 'service', 'install', '--install-scope', 'system'];
+      if (!isRoot) {
+        logger.info('System service requires root privileges. Requesting sudo...');
+      }
+      const result = Bun.spawnSync(command, {
+        stdin: 'inherit',
+        stdout: 'inherit',
+        stderr: 'inherit',
+        env: process.env,
+      });
       if (result.exitCode !== 0) {
         logger.error('Failed to install system service');
         return false;
