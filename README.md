@@ -14,7 +14,9 @@ https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1
 
 ```bash
 brew tap DamianB-BitFlipper/tap
+brew update
 brew install proton-drive-sync
+
 proton-drive-sync setup
 ```
 
@@ -56,7 +58,7 @@ proton-drive-sync setup
 </details>
 
 <details>
-<summary>Windows</summary>
+<summary>Windows (alpha)</summary>
 
 Download the `.zip` from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest), extract, and add to your PATH.
 
