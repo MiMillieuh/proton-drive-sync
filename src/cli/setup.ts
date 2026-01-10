@@ -16,7 +16,7 @@ import { logger } from '../logger.js';
 import { getConfig, DEFAULT_DASHBOARD_PORT } from '../config.js';
 import { getEffectiveHome } from '../paths.js';
 import { authCommand } from './auth.js';
-import { dashboardHostCommand } from './config.js';
+import { dashboardHostCommand, configCommand } from './config.js';
 import { serviceInstallCommand, isServiceInstalled, loadSyncService } from './service/index.js';
 import type { InstallScope } from './service/types.js';
 
@@ -252,6 +252,19 @@ async function configureAuth(): Promise<void> {
   await authCommand({});
 }
 
+async function configureAdvanced(): Promise<void> {
+  showSection('Advanced Configuration');
+
+  const configure = await confirm({
+    message: 'Would you like to configure advanced settings? (sync dirs, exclusions, etc.)',
+    default: false,
+  });
+
+  if (configure) {
+    await configCommand();
+  }
+}
+
 async function waitForServiceAndOpenDashboard(): Promise<void> {
   showSection('Starting Service');
 
@@ -311,7 +324,10 @@ export async function setupCommand(): Promise<void> {
   // Step 3: Authentication
   await configureAuth();
 
-  // Step 4: Wait for service and show dashboard URL
+  // Step 4: Advanced configuration (optional)
+  await configureAdvanced();
+
+  // Step 5: Wait for service and show dashboard URL
   if (serviceInstalled || (await isAlreadyRunning())) {
     await waitForServiceAndOpenDashboard();
   } else {
